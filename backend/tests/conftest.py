@@ -16,6 +16,8 @@ os.environ["DATA_DIR"] = _TMPDIR
 os.environ["UPLOAD_DIR"] = str(Path(_TMPDIR) / "uploads")
 os.environ["VECTOR_STORE_DIR"] = str(Path(_TMPDIR) / "vectorstore")
 os.environ["SQLITE_PATH"] = str(Path(_TMPDIR) / "test.db")
+# Force the deterministic hash-based embedder so tests do not download models.
+os.environ["LATTICE_EMBEDDER"] = "hash"
 
 
 @pytest.fixture(scope="session")
@@ -65,22 +67,55 @@ def sample_pdf_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 @pytest.fixture
 async def reset_db() -> AsyncIterator[None]:
-    """Truncate document/page/chunk tables between tests."""
+    """Truncate document/page/chunk tables between tests and reset vector/lexical state."""
     from sqlalchemy import delete
 
     from app.db.session import async_session_maker
     from app.models.chunk import Chunk
     from app.models.document import Document
     from app.models.page import Page
+    from app.services.lexical_index import get_lexical_index, reset_lexical_index
+    from app.services.vector_store import get_vector_store
 
     async with async_session_maker() as session:
         await session.execute(delete(Chunk))
         await session.execute(delete(Page))
         await session.execute(delete(Document))
         await session.commit()
+
+    # Clear the vector store collection so state does not leak across tests.
+    try:
+        vs = get_vector_store()
+        existing = vs._collection.get(include=[]).get("ids") or []  # noqa: SLF001
+        if existing:
+            vs._collection.delete(ids=existing)  # noqa: SLF001
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Invalidate (and drop) the cached BM25 index.
+    try:
+        await get_lexical_index().invalidate()
+    except Exception:  # noqa: BLE001
+        pass
+    reset_lexical_index()
+
     yield
+
     async with async_session_maker() as session:
         await session.execute(delete(Chunk))
         await session.execute(delete(Page))
         await session.execute(delete(Document))
         await session.commit()
+
+    try:
+        vs = get_vector_store()
+        existing = vs._collection.get(include=[]).get("ids") or []  # noqa: SLF001
+        if existing:
+            vs._collection.delete(ids=existing)  # noqa: SLF001
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        await get_lexical_index().invalidate()
+    except Exception:  # noqa: BLE001
+        pass
+    reset_lexical_index()

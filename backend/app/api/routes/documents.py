@@ -30,6 +30,8 @@ from app.schemas.chunk import ChunkOut
 from app.schemas.document import DocumentDetail, DocumentOut, DocumentStatus
 from app.schemas.page import PageFull, PageOut
 from app.services.ingestion import queue_ingest
+from app.services.lexical_index import get_lexical_index
+from app.services.vector_store import get_vector_store
 
 logger = logging.getLogger(__name__)
 
@@ -288,6 +290,20 @@ async def delete_document(
     storage_path = document.storage_path
     await session.delete(document)
     await session.commit()
+
+    # Remove associated vectors and invalidate the BM25 index.
+    try:
+        get_vector_store().delete_document(document_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "vector_store delete failed document_id=%s error=%s", document_id, exc
+        )
+    try:
+        await get_lexical_index().invalidate()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "lexical invalidate failed document_id=%s error=%s", document_id, exc
+        )
 
     try:
         path = Path(storage_path)
