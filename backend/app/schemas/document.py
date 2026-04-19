@@ -29,6 +29,7 @@ class DocumentDetail(DocumentOut):
     """Document summary plus page previews."""
 
     pages: list[PageOut]
+    num_chunks: int = 0
 
 
 class DocumentStatus(BaseModel):

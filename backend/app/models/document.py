@@ -41,6 +41,7 @@ class Document(Base):
     )
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     storage_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    document_map: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     pages: Mapped[list["Page"]] = relationship(
         "Page",

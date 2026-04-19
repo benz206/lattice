@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from pathlib import Path
 from typing import Any
 
@@ -144,3 +143,61 @@ async def test_get_missing_document_returns_404(app: Any, reset_db: None) -> Non
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.get("/api/documents/does-not-exist")
         assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_chunks_and_document_map_endpoints(
+    app: Any, sample_pdf_path: Path, reset_db: None
+) -> None:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        with sample_pdf_path.open("rb") as fh:
+            response = await client.post(
+                "/api/documents",
+                files={"file": ("sample.pdf", fh, "application/pdf")},
+            )
+        assert response.status_code == 202, response.text
+        doc_id = response.json()["id"]
+
+        status_body = await _poll_ready(client, doc_id, timeout=5.0)
+        assert status_body["status"] == "ready", status_body
+
+        detail = await client.get(f"/api/documents/{doc_id}")
+        assert detail.status_code == 200
+        assert detail.json().get("num_chunks", 0) >= 1
+
+        chunks_resp = await client.get(f"/api/documents/{doc_id}/chunks")
+        assert chunks_resp.status_code == 200
+        chunks = chunks_resp.json()
+        assert isinstance(chunks, list)
+        assert len(chunks) >= 1
+        first = chunks[0]
+        for key in (
+            "id",
+            "ordinal",
+            "text",
+            "page_start",
+            "page_end",
+            "char_start",
+            "char_end",
+            "section_title",
+            "summary",
+            "keywords",
+        ):
+            assert key in first
+        assert first["ordinal"] == 0
+        assert isinstance(first["keywords"], list)
+
+        one_chunk = await client.get(f"/api/documents/{doc_id}/chunks/0")
+        assert one_chunk.status_code == 200
+        assert one_chunk.json()["ordinal"] == 0
+
+        missing_chunk = await client.get(f"/api/documents/{doc_id}/chunks/9999")
+        assert missing_chunk.status_code == 404
+
+        map_resp = await client.get(f"/api/documents/{doc_id}/map")
+        assert map_resp.status_code == 200
+        body = map_resp.json()
+        assert "sections" in body
+        assert isinstance(body["sections"], list)
+        assert body["num_chunks"] == len(chunks)

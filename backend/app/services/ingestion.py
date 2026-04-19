@@ -1,22 +1,26 @@
-"""Document ingestion pipeline: parse PDF, persist pages, update status."""
+"""Document ingestion pipeline: parse PDF, persist pages and chunks, build map."""
 
 from __future__ import annotations
 
+import json
 import logging
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import async_session_maker
+from app.models.chunk import Chunk
 from app.models.document import Document
 from app.models.page import Page
-from app.services.pdf_parser import extract_metadata, extract_pages
+from app.services.chunk_enrich import extract_keywords, summarize_chunk
+from app.services.chunker import chunk_document
+from app.services.document_map import build_document_map
+from app.services.pdf_parser import PageText, extract_metadata, extract_pages
 
 logger = logging.getLogger(__name__)
 
 
 async def ingest_document(session: AsyncSession, document_id: str) -> None:
-    """Parse the PDF for ``document_id`` and persist its pages.
+    """Parse the PDF for ``document_id``, persist pages+chunks, store document map.
 
     Progresses the document through ``processing`` → ``ready`` (or ``failed``).
     """
@@ -45,13 +49,44 @@ async def ingest_document(session: AsyncSession, document_id: str) -> None:
             ]
         )
         document.num_pages = int(metadata.get("num_pages", len(pages)))
+        await session.flush()
+
+        page_inputs = [
+            PageText(page_number=p.page_number, text=p.text, char_count=p.char_count)
+            for p in pages
+        ]
+        chunks = chunk_document(page_inputs)
+
+        session.add_all(
+            [
+                Chunk(
+                    document_id=document_id,
+                    ordinal=c.ordinal,
+                    text=c.text,
+                    page_start=c.page_start,
+                    page_end=c.page_end,
+                    char_start=c.char_start,
+                    char_end=c.char_end,
+                    section_title=c.section_title,
+                    overlap_prefix_len=c.overlap_prefix_len,
+                    summary=summarize_chunk(c.text[c.overlap_prefix_len :]),
+                    keywords=json.dumps(
+                        extract_keywords(c.text[c.overlap_prefix_len :])
+                    ),
+                )
+                for c in chunks
+            ]
+        )
+
+        document.document_map = json.dumps(build_document_map(chunks))
         document.status = "ready"
         document.error = None
         await session.commit()
         logger.info(
-            "ingest complete document_id=%s num_pages=%s",
+            "ingest complete document_id=%s num_pages=%s num_chunks=%s",
             document_id,
             document.num_pages,
+            len(chunks),
         )
     except Exception as exc:  # noqa: BLE001
         await session.rollback()
