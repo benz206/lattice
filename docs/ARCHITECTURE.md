@@ -20,6 +20,10 @@ Lexical retrieval uses BM25 over the full chunk corpus. Vector retrieval queries
 
 Retrieved top-k chunks are assembled into a prompt context. The LLM adapter generates an answer with inline citations referencing chunk IDs. The response includes both the answer text and the supporting passages.
 
+### Answering pipeline (implementation)
+
+A query enters `services.answering.answer_query`, which runs `hybrid_search`, caps the evidence to `MAX_CONTEXT_CHARS` at space boundaries, builds a chat-style prompt requiring `[E#]` citations, and calls an `LlmProtocol` adapter. `[E#]` tokens are parsed back into `Citation` objects tied to chunk metadata. If retrieval is empty/weak (no dual-signal hit and `max_rrf < MIN_TOP_SCORE`) or the model emits `INSUFFICIENT_EVIDENCE`, the service returns a canonical insufficient-evidence response with evidence still populated for transparency.
+
 ## Model Adapters
 
 Adapters abstract over three inference backends — `transformers` (HuggingFace), `llama_cpp` (GGUF), and `openai_compat` (any OpenAI-compatible API). The active backend is selected via the `LLM_BACKEND` env var at startup.
