@@ -97,12 +97,67 @@ async def test_vector_search_sets_score_vector(
 async def test_lexical_search_sets_score_lexical(
     app: Any, sample_pdf_path: Path, reset_db: None
 ) -> None:
+    """Seed a multi-chunk corpus with varied vocab so BM25 IDF is positive."""
+    from app.adapters.embedder import get_embedder
+    from app.db.session import async_session_maker
+    from app.models.chunk import Chunk
+    from app.models.document import Document
+    from app.services.lexical_index import get_lexical_index
+    from app.services.vector_store import get_vector_store
+
+    texts = [
+        "photosynthesis converts sunlight into chemical energy via chlorophyll",
+        "thermodynamics describes entropy and disorder in physical systems",
+        "recursion happens when a function calls itself directly",
+    ]
+    async with async_session_maker() as session:
+        document = Document(
+            filename="seed.pdf",
+            content_type="application/pdf",
+            size_bytes=1,
+            status="ready",
+            storage_path="/tmp/seed.pdf",
+        )
+        session.add(document)
+        await session.flush()
+        chunks = [
+            Chunk(
+                document_id=document.id,
+                ordinal=i,
+                text=t,
+                page_start=1,
+                page_end=1,
+                char_start=i * 100,
+                char_end=(i + 1) * 100,
+                section_title="S",
+            )
+            for i, t in enumerate(texts)
+        ]
+        session.add_all(chunks)
+        await session.commit()
+        chunk_ids = [c.id for c in chunks]
+        document_id = document.id
+
+    embedder = get_embedder()
+    embeddings = embedder.embed(texts, kind="passage")
+    metadatas = [
+        {
+            "document_id": document_id,
+            "ordinal": i,
+            "page_start": 1,
+            "page_end": 1,
+            "section_title": "S",
+        }
+        for i in range(len(texts))
+    ]
+    get_vector_store().upsert(chunk_ids, embeddings, metadatas, texts)
+    await get_lexical_index().invalidate()
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        await _upload_and_wait(client, sample_pdf_path)
         resp = await client.post(
             "/api/search",
-            json={"query": "lattice sample", "mode": "lexical", "top_k": 5},
+            json={"query": "photosynthesis", "mode": "lexical", "top_k": 5},
         )
         assert resp.status_code == 200, resp.text
         body = resp.json()

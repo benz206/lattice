@@ -35,7 +35,8 @@ async def test_upsert_count_and_query_returns_top_match(reset_db: None) -> None:
     assert len(hits) <= 2
     assert len(hits) >= 1
     assert hits[0].chunk_id == "c-alpha"
-    assert -1.0 <= hits[0].score <= 1.0
+    # Cosine similarity ∈ [-1, 1]; allow tiny float32 rounding slack at the boundary.
+    assert -1.0 - 1e-5 <= hits[0].score <= 1.0 + 1e-5
 
 
 @pytest.mark.asyncio
