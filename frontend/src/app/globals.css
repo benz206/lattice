@@ -7,6 +7,7 @@
   --card: #15151c;
   --border: #26262f;
   --accent: #7c8cff;
+  --accent-contrast: #0b0b0f;
 }
 
 @media (prefers-color-scheme: light) {
@@ -17,6 +18,7 @@
     --card: #f6f6f8;
     --border: #e3e3e8;
     --accent: #3b4fd4;
+    --accent-contrast: #ffffff;
   }
 }
 
@@ -30,4 +32,31 @@ body {
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+
+.surface-card {
+  background: var(--card);
+  border-color: var(--border);
+}
+
+.text-muted {
+  color: var(--muted);
+}
+
+.border-line {
+  border-color: var(--border);
+}
+
+@keyframes lattice-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.lattice-spinner {
+  animation: lattice-spin 0.8s linear infinite;
+}
+
+.scroll-target {
+  scroll-margin-top: 5rem;
 }

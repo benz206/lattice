@@ -1,12 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { BACKEND_URL, fetchJson } from "@/lib/api";
-
-type HealthResponse = {
-  status: string;
-  version: string;
-};
+import { getHealth } from "@/lib/api";
 
 type Status = "loading" | "ok" | "unreachable";
 
@@ -17,7 +12,7 @@ export function HealthBadge(): React.JSX.Element {
     let cancelled = false;
     (async () => {
       try {
-        const data = await fetchJson<HealthResponse>(`${BACKEND_URL}/api/health`);
+        const data = await getHealth();
         if (!cancelled) {
           setStatus(data.status === "ok" ? "ok" : "unreachable");
         }
