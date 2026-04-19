@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, Integer, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+
+if TYPE_CHECKING:
+    from app.models.chunk import Chunk
+    from app.models.page import Page
 
 
 def _uuid_str() -> str:
@@ -36,6 +41,17 @@ class Document(Base):
     )
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     storage_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+
+    pages: Mapped[list["Page"]] = relationship(
+        "Page",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    chunks: Mapped[list["Chunk"]] = relationship(
+        "Chunk",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
 
 __all__ = ["Document"]

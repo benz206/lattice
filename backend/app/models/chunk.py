@@ -22,7 +22,7 @@ class Chunk(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
     document_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("documents.id"), nullable=False
+        String(36), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
     )
     ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)

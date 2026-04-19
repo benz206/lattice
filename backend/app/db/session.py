@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from typing import Any
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -19,6 +21,14 @@ def _build_url() -> str:
 
 
 engine = create_async_engine(_build_url(), future=True)
+
+
+@event.listens_for(engine.sync_engine, "connect")
+def _enable_sqlite_fk(dbapi_connection: Any, _conn_record: Any) -> None:
+    """Enable foreign-key enforcement (including ON DELETE CASCADE) on SQLite."""
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
 async_session_maker: async_sessionmaker[AsyncSession] = async_sessionmaker(
     engine, expire_on_commit=False
 )
