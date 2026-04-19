@@ -10,8 +10,10 @@ Both produce shape ``(N, dim)`` float32 arrays, L2-normalized row-wise.
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import re
+import time
 from functools import lru_cache
 from typing import Literal, Protocol, runtime_checkable
 
@@ -24,6 +26,8 @@ _QUERY_INSTRUCTION_PREFIX = (
 )
 
 _TOKEN_RE = re.compile(r"\W+")
+
+logger = logging.getLogger(__name__)
 
 
 @runtime_checkable
@@ -60,6 +64,7 @@ class SentenceTransformerEmbedder:
     def __init__(self, model_name: str | None = None, device: str | None = None) -> None:
         self._model_name = model_name or settings.embedding_model
         self._device_pref = device or settings.inference_device
+        self._batch_size = max(1, int(settings.embed_batch_size))
         self._model: object | None = None
         self._dim: int | None = None
 
@@ -99,6 +104,12 @@ class SentenceTransformerEmbedder:
                 "LATTICE_EMBEDDER=hash to use the test embedder."
             ) from exc
         device = self._select_device()
+        started_at = time.perf_counter()
+        logger.info(
+            "embedder load start model=%s device=%s",
+            self._model_name,
+            device,
+        )
         model = SentenceTransformer(self._model_name, device=device)
         self._model = model
         # Try to introspect dimension without running a forward pass.
@@ -109,6 +120,13 @@ class SentenceTransformerEmbedder:
             probe = np.asarray(probe)
             dim = int(probe.shape[-1])
         self._dim = int(dim)
+        logger.info(
+            "embedder load complete model=%s device=%s dim=%d elapsed_s=%.2f",
+            self._model_name,
+            device,
+            self._dim,
+            time.perf_counter() - started_at,
+        )
 
     def embed(
         self,
@@ -125,15 +143,38 @@ class SentenceTransformerEmbedder:
         else:
             prepared = [t or "" for t in texts]
 
+        lengths = [len(text) for text in prepared]
+        avg_chars = (sum(lengths) / len(lengths)) if lengths else 0.0
+        max_chars = max(lengths, default=0)
+        started_at = time.perf_counter()
+        logger.info(
+            "embed start model=%s kind=%s count=%d batch_size=%d avg_chars=%.1f max_chars=%d",
+            self._model_name,
+            kind,
+            len(prepared),
+            self._batch_size,
+            avg_chars,
+            max_chars,
+        )
         vectors = self._model.encode(  # type: ignore[attr-defined]
             prepared,
+            batch_size=self._batch_size,
             normalize_embeddings=True,
             convert_to_numpy=True,
-            show_progress_bar=False,
+            show_progress_bar=True,
         )
         arr = np.asarray(vectors, dtype=np.float32)
         if arr.ndim == 1:
             arr = arr.reshape(1, -1)
+        logger.info(
+            "embed complete model=%s kind=%s count=%d batch_size=%d dim=%d elapsed_s=%.2f",
+            self._model_name,
+            kind,
+            len(prepared),
+            self._batch_size,
+            int(arr.shape[-1]) if arr.size else 0,
+            time.perf_counter() - started_at,
+        )
         return arr
 
 

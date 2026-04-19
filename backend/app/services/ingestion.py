@@ -34,6 +34,13 @@ def _build_chunk_metadata(document_id: str, chunk: Chunk) -> dict[str, Any]:
     }
 
 
+def _char_stats(texts: list[str]) -> tuple[float, int]:
+    if not texts:
+        return 0.0, 0
+    lengths = [len(text) for text in texts]
+    return (sum(lengths) / len(lengths), max(lengths))
+
+
 async def ingest_document(session: AsyncSession, document_id: str) -> None:
     """Parse the PDF for ``document_id``, persist pages+chunks, store document map.
 
@@ -56,6 +63,13 @@ async def ingest_document(session: AsyncSession, document_id: str) -> None:
         logger.info("ingest start document_id=%s path=%s", document_id, document.storage_path)
         pages = extract_pages(document.storage_path)
         metadata = extract_metadata(document.storage_path)
+        total_page_chars = sum(page.char_count for page in pages)
+        logger.info(
+            "ingest parsed document_id=%s num_pages=%d total_page_chars=%d",
+            document_id,
+            len(pages),
+            total_page_chars,
+        )
 
         session.add_all(
             [
@@ -76,6 +90,14 @@ async def ingest_document(session: AsyncSession, document_id: str) -> None:
             for p in pages
         ]
         chunks = chunk_document(page_inputs)
+        avg_chunk_chars, max_chunk_chars = _char_stats([chunk.text for chunk in chunks])
+        logger.info(
+            "ingest chunked document_id=%s num_chunks=%d avg_chunk_chars=%.1f max_chunk_chars=%d",
+            document_id,
+            len(chunks),
+            avg_chunk_chars,
+            max_chunk_chars,
+        )
 
         chunk_rows = [
             Chunk(
@@ -103,6 +125,12 @@ async def ingest_document(session: AsyncSession, document_id: str) -> None:
         # Embed + upsert into the vector store.
         if chunk_rows:
             embedder = get_embedder()
+            logger.info(
+                "ingest embedding document_id=%s embedder=%s chunk_count=%d",
+                document_id,
+                embedder.name,
+                len(chunk_rows),
+            )
             embeddings = embedder.embed(
                 [c.text for c in chunk_rows], kind="passage"
             )

@@ -42,6 +42,9 @@ backend/data/
 !.env.example
 !.env.local.example
 
+# Local model files
+.models/
+
 # Node
 node_modules/
 npm-debug.log*

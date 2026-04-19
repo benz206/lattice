@@ -6,14 +6,24 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _resolve_repo_path(path_str: str) -> str:
+    path = Path(path_str)
+    if path.is_absolute():
+        return str(path)
+    return str((REPO_ROOT / path).resolve())
 
 
 class Settings(BaseSettings):
     """Runtime configuration for the Lattice backend."""
 
     model_config = SettingsConfigDict(
-        env_file="../.env",
+        env_file=str(REPO_ROOT / ".env"),
         extra="ignore",
         case_sensitive=False,
     )
@@ -29,12 +39,27 @@ class Settings(BaseSettings):
 
     embedding_model: str = "Alibaba-NLP/gte-Qwen2-1.5B-instruct"
     embedding_model_fallback: str = "BAAI/bge-m3"
+    embed_batch_size: int = Field(default=16, validation_alias="LATTICE_EMBED_BATCH_SIZE")
 
     llm_model: str = "Qwen/Qwen2.5-1.5B-Instruct"
     llm_backend: str = "transformers"
     inference_device: str = "auto"
+    llm_base_url: str = Field(
+        default="http://localhost:11434/v1",
+        validation_alias="LATTICE_LLM_BASE_URL",
+    )
+    llm_api_key: str = Field(default="", validation_alias="LATTICE_LLM_API_KEY")
+    llm_gguf_path: str = Field(default="", validation_alias="LATTICE_LLM_GGUF_PATH")
+    llm_n_ctx: int = Field(default=4096, validation_alias="LATTICE_LLM_N_CTX")
 
     max_upload_mb: int = 200
+
+    def model_post_init(self, __context: object) -> None:
+        del __context
+        self.data_dir = _resolve_repo_path(self.data_dir)
+        self.upload_dir = _resolve_repo_path(self.upload_dir)
+        self.sqlite_path = _resolve_repo_path(self.sqlite_path)
+        self.vector_store_dir = _resolve_repo_path(self.vector_store_dir)
 
     def ensure_dirs(self) -> None:
         """Create on-disk directories required for storage."""

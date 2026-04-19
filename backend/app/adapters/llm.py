@@ -250,12 +250,9 @@ class OpenAICompatLlm:
         self._model_name = model_name or settings.llm_model
         self._base_url = (
             base_url
-            or os.environ.get("LATTICE_LLM_BASE_URL")
-            or "http://localhost:11434/v1"
+            or settings.llm_base_url
         ).rstrip("/")
-        self._api_key = api_key if api_key is not None else os.environ.get(
-            "LATTICE_LLM_API_KEY", ""
-        )
+        self._api_key = api_key if api_key is not None else settings.llm_api_key
 
     @property
     def name(self) -> str:
@@ -303,7 +300,8 @@ class LlamaCppLlm:
     """``llama_cpp.Llama`` backend reading a GGUF path from env."""
 
     def __init__(self, model_path: str | None = None) -> None:
-        self._model_path = model_path or os.environ.get("LATTICE_LLM_GGUF_PATH", "")
+        self._model_path = model_path or settings.llm_gguf_path
+        self._n_ctx = max(512, int(settings.llm_n_ctx))
         self._llama: Any = None
 
     @property
@@ -324,7 +322,11 @@ class LlamaCppLlm:
             raise RuntimeError(
                 "llama_cpp is not installed; install llama-cpp-python or set LATTICE_LLM=stub."
             ) from exc
-        self._llama = Llama(model_path=self._model_path, verbose=False)
+        self._llama = Llama(
+            model_path=self._model_path,
+            n_ctx=self._n_ctx,
+            verbose=False,
+        )
 
     def _generate_sync(
         self,

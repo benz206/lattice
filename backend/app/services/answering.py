@@ -227,9 +227,7 @@ async def answer_query(
 ) -> AnswerResult:
     """Run hybrid retrieval, prompt the LLM, parse citations, and return a result."""
     alpha = 0.5
-    hits = await hybrid_search(
-        query, top_k=top_k, document_id=document_id, alpha=alpha
-    )
+    hits = await hybrid_search(query, top_k=top_k, document_id=document_id, alpha=alpha)
 
     raw_passages: list[EvidencePassage] = []
     for h in hits:
@@ -262,7 +260,7 @@ async def answer_query(
         )
 
     messages = build_prompt(query, passages)
-    raw_answer = await backend.generate(messages, max_tokens=512, temperature=0.0)
+    raw_answer = await backend.generate(messages, max_tokens=2048, temperature=0.0)
     answer = (raw_answer or "").strip()
 
     if answer == INSUFFICIENT_MARKER:
