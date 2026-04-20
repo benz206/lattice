@@ -18,8 +18,14 @@ pip install -e ".[dev]"
 
 echo "=== Setting up frontend ==="
 cd "$REPO_ROOT/frontend"
-echo "Installing Node dependencies..."
-npm install
+
+if command -v bun >/dev/null 2>&1; then
+  echo "Installing Node dependencies with bun..."
+  bun install
+else
+  echo "bun not found; falling back to npm..."
+  npm install
+fi
 
 echo ""
 echo "Setup complete. Run 'bash scripts/dev.sh' to start both services."

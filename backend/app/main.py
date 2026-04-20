@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -13,12 +15,27 @@ from app.core.config import settings
 from app.core.logging import configure_logging
 from app.db.session import init_db
 
+logger = logging.getLogger("app.main")
+
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Application lifecycle: ensure storage and database are ready on startup."""
     settings.ensure_dirs()
     await init_db()
+
+    embedder_override = os.environ.get("LATTICE_EMBEDDER", "").strip().lower()
+    llm_override = os.environ.get("LATTICE_LLM", "").strip().lower()
+    resolved_embedder = "hash" if embedder_override == "hash" else settings.embedding_model
+    resolved_llm = "stub" if llm_override == "stub" else settings.llm_model
+    logger.info(
+        "lattice ready backend_port=%d embedder=%s llm=%s llm_backend=%s data_dir=%s",
+        settings.backend_port,
+        resolved_embedder,
+        resolved_llm,
+        settings.llm_backend,
+        settings.data_dir,
+    )
     yield
 
 
