@@ -24,9 +24,14 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     settings.ensure_dirs()
     await init_db()
 
-    embedder_override = os.environ.get("LATTICE_EMBEDDER", "").strip().lower()
+    embedder_override = (
+        os.environ.get("LATTICE_EMBEDDER") or settings.embedder_backend
+    ).strip().lower()
     llm_override = os.environ.get("LATTICE_LLM", "").strip().lower()
-    resolved_embedder = "hash" if embedder_override == "hash" else settings.embedding_model
+    if embedder_override in {"hash", "openai_compat", "openrouter"}:
+        resolved_embedder = f"{embedder_override}:{settings.embedding_model}"
+    else:
+        resolved_embedder = settings.embedding_model
     resolved_llm = "stub" if llm_override == "stub" else settings.llm_model
     logger.info(
         "lattice ready backend_port=%d embedder=%s llm=%s llm_backend=%s data_dir=%s",

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -15,6 +17,19 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 _DEFAULT_COLLECTION = "lattice_chunks"
+
+
+def _collection_name_for_current_embedder() -> str:
+    """Return a stable collection name for the configured embedding model."""
+    backend = (
+        os.environ.get("LATTICE_EMBEDDER") or settings.embedder_backend
+    ).strip().lower()
+    model = settings.embedding_model.strip()
+    if not backend and model == "Alibaba-NLP/gte-Qwen2-1.5B-instruct":
+        return _DEFAULT_COLLECTION
+    key = f"{backend or 'sentence_transformers'}:{model}"
+    suffix = hashlib.blake2b(key.encode("utf-8"), digest_size=6).hexdigest()
+    return f"{_DEFAULT_COLLECTION}_{suffix}"
 
 
 @dataclass(frozen=True)
@@ -196,7 +211,10 @@ class VectorStore:
 @lru_cache(maxsize=1)
 def get_vector_store() -> VectorStore:
     """Return a cached ``VectorStore`` pointed at ``settings.vector_store_dir``."""
-    return VectorStore(persist_path=settings.vector_store_dir)
+    return VectorStore(
+        persist_path=settings.vector_store_dir,
+        collection_name=_collection_name_for_current_embedder(),
+    )
 
 
 def reset_vector_store_cache() -> None:

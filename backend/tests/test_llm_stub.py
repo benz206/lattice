@@ -6,10 +6,12 @@ import pytest
 
 from app.adapters.llm import (
     Message,
+    OpenAICompatLlm,
     StubLlm,
     get_llm,
     reset_llm_cache,
 )
+from app.core.config import settings
 
 
 @pytest.mark.asyncio
@@ -50,3 +52,47 @@ def test_get_llm_with_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
         assert llm.name == "stub-llm"
     finally:
         reset_llm_cache()
+
+
+@pytest.mark.asyncio
+async def test_openai_compat_sends_openrouter_headers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import httpx
+
+    captured: dict[str, object] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["headers"] = dict(request.headers)
+        captured["json"] = request.content.decode()
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "ok"}}]},
+        )
+
+    transport = httpx.MockTransport(handler)
+
+    class MockAsyncClient(httpx.AsyncClient):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            super().__init__(transport=transport)
+
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+    monkeypatch.setattr(settings, "llm_http_referer", "https://example.test")
+    monkeypatch.setattr(settings, "llm_app_title", "Lattice Test")
+
+    llm = OpenAICompatLlm(
+        model_name="openai/gpt-oss-120b:free",
+        base_url="https://openrouter.ai/api/v1",
+        api_key="test-key",
+    )
+
+    out = await llm.generate([{"role": "user", "content": "ping"}])
+
+    headers = captured["headers"]
+    assert out == "ok"
+    assert captured["url"] == "https://openrouter.ai/api/v1/chat/completions"
+    assert isinstance(headers, dict)
+    assert headers["authorization"] == "Bearer test-key"
+    assert headers["http-referer"] == "https://example.test"
+    assert headers["x-title"] == "Lattice Test"

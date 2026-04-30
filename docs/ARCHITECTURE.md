@@ -109,12 +109,22 @@ On any exception: rollback, best-effort vector cleanup, `status=failed` with the
 
 `EmbedderProtocol` (`embed(texts, kind) → np.ndarray`) and `LlmProtocol` (`async generate(messages, ...) → str`). Each adapter lazy-imports its heavy dependency so `import app` stays cheap and tests can force the stub path with `LATTICE_EMBEDDER=hash` / `LATTICE_LLM=stub`. `get_embedder` and `get_llm` are process-wide `lru_cache` singletons.
 
+Embedder backends (selected by `LATTICE_EMBEDDER`; unset uses `sentence_transformers`):
+
+| Backend | Class | Notes |
+| --- | --- | --- |
+| `sentence_transformers` / unset | `SentenceTransformerEmbedder` | Local HuggingFace/SentenceTransformer model from `EMBEDDING_MODEL`. |
+| `openrouter` / `openai_compat` | `OpenAICompatEmbedder` | `httpx` against `/v1/embeddings`; use `LATTICE_EMBEDDING_BASE_URL` and `LATTICE_EMBEDDING_API_KEY`, falling back to `LATTICE_LLM_API_KEY`. |
+| `hash` | `HashEmbedder` | Deterministic local fallback for tests/evals only. |
+
+The Chroma collection name is keyed by the configured embedder/backend, so switching embedding models creates a separate vector collection instead of mixing incompatible dimensions. Existing documents should be re-indexed after a model switch to populate the new collection.
+
 LLM backends (selected by `LLM_BACKEND` env, or `LATTICE_LLM=stub` override):
 
 | Backend | Class | Notes |
 | --- | --- | --- |
 | `transformers` | `TransformersLlm` | HuggingFace causal LM, `apply_chat_template` when available. |
-| `openai_compat` | `OpenAICompatLlm` | `httpx` against `/v1/chat/completions`; default base URL is Ollama `http://localhost:11434/v1`. |
+| `openai_compat` | `OpenAICompatLlm` | `httpx` against `/v1/chat/completions`; default base URL is Ollama `http://localhost:11434/v1`, and hosted providers such as OpenRouter work by setting `LATTICE_LLM_BASE_URL` plus `LATTICE_LLM_API_KEY`. |
 | `llama_cpp` | `LlamaCppLlm` | GGUF path via `LATTICE_LLM_GGUF_PATH`. |
 | `stub` | `StubLlm` | Deterministic; parses `[E1] (chunk=...)` header from the prompt. Used in tests. |
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -39,7 +38,13 @@ class Settings(BaseSettings):
 
     embedding_model: str = "Alibaba-NLP/gte-Qwen2-1.5B-instruct"
     embedding_model_fallback: str = "BAAI/bge-m3"
+    embedder_backend: str = Field(default="", validation_alias="LATTICE_EMBEDDER")
     embed_batch_size: int = Field(default=16, validation_alias="LATTICE_EMBED_BATCH_SIZE")
+    embedding_base_url: str = Field(
+        default="https://openrouter.ai/api/v1",
+        validation_alias="LATTICE_EMBEDDING_BASE_URL",
+    )
+    embedding_api_key: str = Field(default="", validation_alias="LATTICE_EMBEDDING_API_KEY")
 
     llm_model: str = "Qwen/Qwen2.5-1.5B-Instruct"
     llm_backend: str = "transformers"
@@ -49,6 +54,14 @@ class Settings(BaseSettings):
         validation_alias="LATTICE_LLM_BASE_URL",
     )
     llm_api_key: str = Field(default="", validation_alias="LATTICE_LLM_API_KEY")
+    llm_http_referer: str = Field(
+        default="",
+        validation_alias="LATTICE_LLM_HTTP_REFERER",
+    )
+    llm_app_title: str = Field(
+        default="Lattice",
+        validation_alias="LATTICE_LLM_APP_TITLE",
+    )
     llm_gguf_path: str = Field(default="", validation_alias="LATTICE_LLM_GGUF_PATH")
     llm_n_ctx: int = Field(default=4096, validation_alias="LATTICE_LLM_N_CTX")
 

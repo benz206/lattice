@@ -1,7 +1,8 @@
 """Embedding adapters for Lattice retrieval.
 
-Provides a minimal protocol and two implementations:
-  * ``SentenceTransformerEmbedder`` — the production path, lazy-loaded.
+Provides a minimal protocol and three implementations:
+  * ``SentenceTransformerEmbedder`` — local production path, lazy-loaded.
+  * ``OpenAICompatEmbedder`` — hosted OpenAI-compatible embeddings endpoint.
   * ``HashEmbedder`` — deterministic, stdlib-only fallback used in tests.
 
 Both produce shape ``(N, dim)`` float32 arrays, L2-normalized row-wise.
@@ -15,7 +16,7 @@ import os
 import re
 import time
 from functools import lru_cache
-from typing import Literal, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
 import numpy as np
 
@@ -178,6 +179,125 @@ class SentenceTransformerEmbedder:
         return arr
 
 
+class OpenAICompatEmbedder:
+    """Embedder for OpenAI-compatible ``/v1/embeddings`` endpoints.
+
+    OpenRouter is the primary hosted target, but the payload/response shape is
+    the standard OpenAI embeddings API.
+    """
+
+    def __init__(
+        self,
+        model_name: str | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+    ) -> None:
+        self._model_name = model_name or settings.embedding_model
+        self._base_url = (base_url or settings.embedding_base_url).rstrip("/")
+        self._api_key = (
+            api_key
+            if api_key is not None
+            else (settings.embedding_api_key or settings.llm_api_key)
+        )
+        self._batch_size = max(1, int(settings.embed_batch_size))
+        self._dim: int | None = None
+
+    @property
+    def name(self) -> str:
+        return self._model_name
+
+    @property
+    def dim(self) -> int:
+        if self._dim is None:
+            self._dim = int(self.embed(["dimension probe"]).shape[-1])
+        return self._dim
+
+    def _headers(self) -> dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        if settings.llm_http_referer:
+            headers["HTTP-Referer"] = settings.llm_http_referer
+        if settings.llm_app_title:
+            headers["X-Title"] = settings.llm_app_title
+        return headers
+
+    def _embed_batch(self, texts: list[str]) -> np.ndarray:
+        import httpx
+
+        payload: dict[str, Any] = {
+            "model": self._model_name,
+            "input": texts,
+        }
+        url = f"{self._base_url}/embeddings"
+        with httpx.Client(timeout=httpx.Timeout(120.0)) as client:
+            resp = client.post(url, json=payload, headers=self._headers())
+            resp.raise_for_status()
+            data = resp.json()
+
+        try:
+            rows = data["data"]
+            vectors = [rows[i]["embedding"] for i in range(len(rows))]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise RuntimeError(
+                f"OpenAI-compatible embedding response missing data[].embedding: {data!r}"
+            ) from exc
+
+        arr = np.asarray(vectors, dtype=np.float32)
+        if arr.ndim == 1:
+            arr = arr.reshape(1, -1)
+        if arr.shape[0] != len(texts):
+            raise RuntimeError(
+                "OpenAI-compatible embedding response row count "
+                f"{arr.shape[0]} != input count {len(texts)}"
+            )
+        return arr
+
+    def embed(
+        self,
+        texts: list[str],
+        *,
+        kind: Literal["query", "passage"] = "passage",
+    ) -> np.ndarray:
+        del kind
+        prepared = [t or "" for t in texts]
+        if not prepared:
+            return np.zeros((0, self.dim), dtype=np.float32)
+
+        lengths = [len(text) for text in prepared]
+        avg_chars = sum(lengths) / len(lengths)
+        max_chars = max(lengths, default=0)
+        started_at = time.perf_counter()
+        logger.info(
+            "embed start model=%s backend=openai_compat count=%d batch_size=%d "
+            "avg_chars=%.1f max_chars=%d",
+            self._model_name,
+            len(prepared),
+            self._batch_size,
+            avg_chars,
+            max_chars,
+        )
+
+        batches: list[np.ndarray] = []
+        for start in range(0, len(prepared), self._batch_size):
+            batches.append(self._embed_batch(prepared[start : start + self._batch_size]))
+        arr = np.vstack(batches) if batches else np.zeros((0, self.dim), dtype=np.float32)
+        arr = _l2_normalize(arr)
+        if self._dim is None and arr.shape[-1] > 0:
+            self._dim = int(arr.shape[-1])
+
+        logger.info(
+            "embed complete model=%s backend=openai_compat count=%d batch_size=%d "
+            "dim=%d elapsed_s=%.2f",
+            self._model_name,
+            len(prepared),
+            self._batch_size,
+            int(arr.shape[-1]) if arr.size else self.dim,
+            time.perf_counter() - started_at,
+        )
+        return arr
+
+
 class HashEmbedder:
     """Deterministic, stdlib-only embedder used for tests.
 
@@ -230,9 +350,13 @@ class HashEmbedder:
 @lru_cache(maxsize=1)
 def get_embedder() -> EmbedderProtocol:
     """Return the process-wide embedder, honouring ``LATTICE_EMBEDDER`` env."""
-    choice = os.environ.get("LATTICE_EMBEDDER", "").strip().lower()
+    choice = (
+        os.environ.get("LATTICE_EMBEDDER") or settings.embedder_backend
+    ).strip().lower()
     if choice == "hash":
         return HashEmbedder()
+    if choice in {"openai_compat", "openrouter"}:
+        return OpenAICompatEmbedder(settings.embedding_model)
     return SentenceTransformerEmbedder(settings.embedding_model)
 
 
@@ -244,6 +368,7 @@ def reset_embedder_cache() -> None:
 __all__ = [
     "EmbedderProtocol",
     "SentenceTransformerEmbedder",
+    "OpenAICompatEmbedder",
     "HashEmbedder",
     "get_embedder",
     "reset_embedder_cache",

@@ -119,9 +119,15 @@ Everything is env-driven through `.env` (see `.env.example` for the full list). 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `EMBEDDING_MODEL` | `Alibaba-NLP/gte-Qwen2-1.5B-instruct` | HuggingFace model id for the embedder. |
+| `LATTICE_EMBEDDER` | unset | Optional embedder backend override: `openrouter`, `openai_compat`, or `hash`. |
+| `LATTICE_EMBEDDING_BASE_URL` | `https://openrouter.ai/api/v1` | OpenAI-compatible embeddings endpoint. |
+| `LATTICE_EMBEDDING_API_KEY` | unset | Bearer token for hosted embedding providers. Falls back to `LATTICE_LLM_API_KEY` if unset. |
 | `LLM_MODEL` | `Qwen/Qwen2.5-1.5B-Instruct` | Model used for answer generation. |
 | `LLM_BACKEND` | `transformers` | `transformers`, `openai_compat`, or `llama_cpp`. |
 | `LATTICE_LLM_BASE_URL` | `http://localhost:11434/v1` | OpenAI-compatible endpoint (Ollama by default). |
+| `LATTICE_LLM_API_KEY` | unset | Bearer token for hosted OpenAI-compatible providers. |
+| `LATTICE_LLM_HTTP_REFERER` | unset | Optional `HTTP-Referer` header for OpenRouter rankings/analytics. |
+| `LATTICE_LLM_APP_TITLE` | `Lattice` | Optional `X-Title` header for OpenRouter rankings/analytics. |
 | `INFERENCE_DEVICE` | `auto` | `cpu` / `mps` / `cuda` / `auto`. |
 | `MAX_UPLOAD_MB` | `200` | Server-side upload cap. |
 | `LATTICE_EMBEDDER=hash` | unset | Skip the real embedder; use the deterministic hash fallback. Used by the test suite and eval harness. |
@@ -145,6 +151,35 @@ LATTICE_LLM_BASE_URL=http://localhost:11434/v1
 ```
 
 The same setting works for vLLM (`/v1`), llama.cpp's server, LM Studio, or the OpenAI API itself (set `LATTICE_LLM_API_KEY`).
+
+## Running a free OpenRouter model
+
+OpenRouter exposes an OpenAI-compatible API, so use the same `openai_compat` backend. Create an OpenRouter API key, then set:
+
+```bash
+LLM_BACKEND=openai_compat
+LLM_MODEL=openai/gpt-oss-120b:free
+LATTICE_LLM_BASE_URL=https://openrouter.ai/api/v1
+LATTICE_LLM_API_KEY=sk-or-v1-your-openrouter-key
+LATTICE_LLM_APP_TITLE=Lattice
+```
+
+`LATTICE_LLM_HTTP_REFERER` is optional, but you can set it to your deployed app URL if you have one.
+
+## Running free OpenRouter embeddings
+
+Lattice can also send embeddings to OpenRouter through the same OpenAI-compatible API style:
+
+```bash
+LATTICE_EMBEDDER=openrouter
+EMBEDDING_MODEL=nvidia/llama-nemotron-embed-vl-1b-v2:free
+LATTICE_EMBEDDING_BASE_URL=https://openrouter.ai/api/v1
+LATTICE_EMBEDDING_API_KEY=sk-or-v1-your-openrouter-key
+```
+
+If `LATTICE_EMBEDDING_API_KEY` is unset, Lattice reuses `LATTICE_LLM_API_KEY`.
+
+When switching embedding models, Lattice writes to a model-specific Chroma collection to avoid dimension conflicts with older vectors. Re-index existing documents so the new collection is populated.
 
 ## Running tests
 

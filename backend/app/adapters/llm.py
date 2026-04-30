@@ -237,8 +237,8 @@ class TransformersLlm:
 class OpenAICompatLlm:
     """Async client for any OpenAI-compatible ``/v1/chat/completions`` endpoint.
 
-    Works with Ollama (``http://localhost:11434/v1``), vLLM, llama.cpp's server,
-    LM Studio, and the OpenAI API itself.
+    Works with Ollama (``http://localhost:11434/v1``), OpenRouter, vLLM,
+    llama.cpp's server, LM Studio, and the OpenAI API itself.
     """
 
     def __init__(
@@ -280,6 +280,10 @@ class OpenAICompatLlm:
         headers = {"Content-Type": "application/json"}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
+        if settings.llm_http_referer:
+            headers["HTTP-Referer"] = settings.llm_http_referer
+        if settings.llm_app_title:
+            headers["X-Title"] = settings.llm_app_title
 
         url = f"{self._base_url}/chat/completions"
         async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
