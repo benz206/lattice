@@ -19,21 +19,19 @@ venv/
 env/
 ENV/
 
+# Local app storage
+data/
+
 # SQLite
 *.db
 *.sqlite
 *.sqlite3
 
 # Vector store dirs
-backend/data/vectorstore/
 **/vectorstore/
 
 # Uploads
-backend/data/uploads/
 **/uploads/
-
-# Data dir
-backend/data/
 
 # Environment files
 .env

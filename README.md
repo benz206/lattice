@@ -87,8 +87,8 @@ Lattice will be available at `http://localhost:3000`.
 | ------------------------------------ | ------------------------------------- |
 | `bash scripts/setup.sh`              | Install dependencies with Bun         |
 | `bash scripts/dev.sh`                | Run the Next.js app                   |
-| `cd frontend && bun run typecheck`   | TypeScript type-check                 |
-| `cd frontend && bun run lint`        | ESLint                                |
+| `bun run typecheck`                  | TypeScript type-check                 |
+| `bun run lint`                       | ESLint                                |
 
 ## Configuration
 
@@ -164,7 +164,8 @@ embeddings are regenerated with the new model dimensions.
 
 ```text
 lattice/
-├── frontend/             # Next.js 16 app (UI, API routes, server pipeline)
+├── src/                  # Next.js 16 app, API routes, UI, server pipeline
+├── package.json          # Bun scripts and Next.js dependencies
 ├── docs/                 # ARCHITECTURE.md, PERFORMANCE.md
 └── scripts/              # setup.sh, dev.sh
 ```

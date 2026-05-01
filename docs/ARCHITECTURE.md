@@ -1,8 +1,8 @@
 # Architecture
 
-Lattice is a single Next.js 16 App Router application. The UI lives in
-`frontend/src/app` and `frontend/src/components`; the API and retrieval pipeline
-live in `frontend/src/app/api` plus `frontend/src/lib/server`.
+Lattice is a single Next.js 16 App Router application at the repository root.
+The UI lives in `src/app` and `src/components`; the API and retrieval pipeline
+live in `src/app/api` plus `src/lib/server`.
 
 ## Data flow
 
@@ -28,15 +28,15 @@ Question/search -> /api/search or /api/answer
 
 | Path | Responsibility |
 | --- | --- |
-| `frontend/src/app/api/*` | Next.js route handlers replacing the old backend API. |
-| `frontend/src/lib/server/settings.ts` | Env and repo-relative path resolution. |
-| `frontend/src/lib/server/store.ts` | Local JSON document/page/chunk persistence. |
-| `frontend/src/lib/server/pdf.ts` | PDF text extraction via `pdftotext`, with a minimal fallback. |
-| `frontend/src/lib/server/chunking.ts` | Section-aware chunking, summaries, keywords, document map. |
-| `frontend/src/lib/server/embedding.ts` | Hash embeddings by default; OpenAI-compatible embeddings when configured. |
-| `frontend/src/lib/server/retrieval.ts` | Vector, lexical, and hybrid retrieval. |
-| `frontend/src/lib/server/answering.ts` | Evidence capping, LLM prompt, citations, confidence scoring. |
-| `frontend/src/lib/api.ts` | Client/server fetch helpers and shared response types. |
+| `src/app/api/*` | Next.js route handlers replacing the old backend API. |
+| `src/lib/server/settings.ts` | Env and repo-relative path resolution. |
+| `src/lib/server/store.ts` | Local JSON document/page/chunk persistence. |
+| `src/lib/server/pdf.ts` | PDF text extraction via `pdftotext`, with a minimal fallback. |
+| `src/lib/server/chunking.ts` | Section-aware chunking, summaries, keywords, document map. |
+| `src/lib/server/embedding.ts` | Hash embeddings by default; OpenAI-compatible embeddings when configured. |
+| `src/lib/server/retrieval.ts` | Vector, lexical, and hybrid retrieval. |
+| `src/lib/server/answering.ts` | Evidence capping, LLM prompt, citations, confidence scoring. |
+| `src/lib/api.ts` | Client/server fetch helpers and shared response types. |
 
 ## Storage layout
 

@@ -1,20 +1,20 @@
 import path from "node:path";
 
-function repoRoot(): string {
-  return path.basename(process.cwd()) === "frontend"
-    ? path.resolve(process.cwd(), "..")
-    : process.cwd();
-}
+const root = process.cwd();
 
-function resolveRepoPath(value: string): string {
+function resolveEnvPath(value: string): string {
   if (path.isAbsolute(value)) return value;
-  return path.resolve(repoRoot(), value);
+  return path.resolve(/*turbopackIgnore: true*/ root, value);
 }
 
 export const settings = {
-  repoRoot: repoRoot(),
-  dataDir: resolveRepoPath(process.env.DATA_DIR ?? "./data"),
-  uploadDir: resolveRepoPath(process.env.UPLOAD_DIR ?? "./data/uploads"),
+  repoRoot: root,
+  dataDir: process.env.DATA_DIR
+    ? resolveEnvPath(process.env.DATA_DIR)
+    : path.join(root, "data"),
+  uploadDir: process.env.UPLOAD_DIR
+    ? resolveEnvPath(process.env.UPLOAD_DIR)
+    : path.join(root, "data", "uploads"),
   maxUploadMb: Number.parseInt(process.env.MAX_UPLOAD_MB ?? "200", 10),
   embedder: (process.env.LATTICE_EMBEDDER ?? "hash").trim().toLowerCase(),
   embeddingModel: process.env.EMBEDDING_MODEL ?? "hash-local",
