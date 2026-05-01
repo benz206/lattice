@@ -1,9 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { use, useState } from "react";
+import { use, useMemo, useState } from "react";
+import { ActivityRail, type ActivityStep } from "@/components/ActivityRail";
 import { AppHeader } from "@/components/AppHeader";
 import { EvidenceCard } from "@/components/EvidenceCard";
+import { ResultIntel } from "@/components/ResultIntel";
+import { ResultPagination } from "@/components/ResultPagination";
 import { Spinner } from "@/components/Spinner";
 import {
   ApiError,
@@ -18,6 +21,60 @@ interface PageProps {
 }
 
 const MODES: SearchMode[] = ["hybrid", "vector", "lexical"];
+const RESULT_PAGE_SIZE = 5;
+
+function searchSteps({
+  pending,
+  error,
+  results,
+  mode,
+  topK,
+}: {
+  pending: boolean;
+  error: string | null;
+  results: SearchHit[] | null;
+  mode: SearchMode;
+  topK: number;
+}): ActivityStep[] {
+  const hasResults = results !== null;
+  const activeState: ActivityStep["state"] = error
+    ? "error"
+    : pending
+      ? "active"
+      : hasResults
+        ? "done"
+        : "waiting";
+  return [
+    {
+      label: "Query",
+      detail: "Search terms are scoped to this document.",
+      state: pending || hasResults || error ? "done" : "waiting",
+      metric: mode,
+    },
+    {
+      label: "Fetch",
+      detail: hasResults
+        ? `Fetched ${results.length} matching chunks and page spans.`
+        : "Fetching candidate chunks from the index.",
+      state: activeState,
+      metric: `top_k ${topK}`,
+    },
+    {
+      label: "Score",
+      detail: hasResults
+        ? "Hybrid, vector, and lexical signals are shown on each card."
+        : "Ranking and normalizing retrieval scores.",
+      state: hasResults ? "done" : activeState,
+      metric: hasResults ? `${results.length} hits` : undefined,
+    },
+    {
+      label: "Inspect",
+      detail: error ?? (hasResults ? "Results, pages, sections, and score bars are visible." : "Waiting for results."),
+      state: error ? "error" : hasResults ? "done" : pending ? "active" : "waiting",
+      metric: hasResults ? `${Math.ceil(results.length / RESULT_PAGE_SIZE)} pages` : undefined,
+    },
+  ];
+}
 
 export default function SearchPage({ params }: PageProps): React.JSX.Element {
   const { id } = use(params);
@@ -28,8 +85,15 @@ export default function SearchPage({ params }: PageProps): React.JSX.Element {
   const [results, setResults] = useState<SearchHit[] | null>(null);
   const [submittedQuery, setSubmittedQuery] = useState<string>("");
   const [submittedMode, setSubmittedMode] = useState<SearchMode>("hybrid");
+  const [page, setPage] = useState<number>(1);
   const [pending, setPending] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+
+  const visibleResults = useMemo(() => {
+    if (!results) return [];
+    const start = (page - 1) * RESULT_PAGE_SIZE;
+    return results.slice(start, start + RESULT_PAGE_SIZE);
+  }, [page, results]);
 
   const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -47,6 +111,7 @@ export default function SearchPage({ params }: PageProps): React.JSX.Element {
       setResults(resp.results);
       setSubmittedQuery(resp.query);
       setSubmittedMode(resp.mode);
+      setPage(1);
     } catch (err) {
       const message =
         err instanceof ApiError
@@ -65,8 +130,14 @@ export default function SearchPage({ params }: PageProps): React.JSX.Element {
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col gap-6 px-6 py-8">
       <AppHeader subtitle="Search" />
 
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">Search chunks</h1>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Search evidence</h1>
+          <p className="mt-1 max-w-2xl text-sm text-muted">
+            Retrieve ranked chunks from this document, then inspect the pages,
+            sections, scoring signals, and exact source text behind each hit.
+          </p>
+        </div>
         <Link
           href={`/documents/${id}`}
           className="text-sm text-[color:var(--accent)] hover:underline"
@@ -77,7 +148,7 @@ export default function SearchPage({ params }: PageProps): React.JSX.Element {
 
       <form
         onSubmit={onSubmit}
-        className="surface-card flex flex-col gap-3 rounded-xl border p-4"
+        className="surface-card flex flex-col gap-4 rounded-lg border p-4"
       >
         <input
           type="text"
@@ -86,7 +157,7 @@ export default function SearchPage({ params }: PageProps): React.JSX.Element {
           placeholder="Search terms or a natural-language query..."
           className="w-full rounded-md border border-line bg-[color:var(--background)] px-3 py-2 text-sm focus:border-[color:var(--accent)] focus:outline-none"
         />
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-end justify-between gap-3">
           <div className="flex items-center gap-3">
             <label className="flex items-center gap-2 text-xs text-muted">
               mode
@@ -103,16 +174,16 @@ export default function SearchPage({ params }: PageProps): React.JSX.Element {
               </select>
             </label>
             <label className="flex items-center gap-2 text-xs text-muted">
-              top_k
+              retrieval depth
               <input
                 type="number"
                 min={1}
-                max={50}
+                max={100}
                 value={topK}
                 onChange={(e) => {
                   const n = Number.parseInt(e.target.value, 10);
                   if (Number.isFinite(n)) {
-                    setTopK(Math.max(1, Math.min(50, n)));
+                    setTopK(Math.max(1, Math.min(100, n)));
                   }
                 }}
                 className="w-16 rounded-md border border-line bg-[color:var(--background)] px-2 py-1 text-center text-xs"
@@ -136,25 +207,48 @@ export default function SearchPage({ params }: PageProps): React.JSX.Element {
         </div>
       ) : null}
 
+      {(pending || results !== null || error) ? (
+        <ActivityRail
+          title="Search pipeline"
+          steps={searchSteps({ pending, error, results, mode: submittedMode, topK })}
+        />
+      ) : null}
+
       {results !== null ? (
-        <section className="flex flex-col gap-3">
-          <div className="text-xs text-muted">
-            {results.length} result{results.length === 1 ? "" : "s"} for
-            <span className="mx-1 font-medium text-[color:var(--foreground)]">
-              {submittedQuery}
-            </span>
-            · mode {submittedMode}
-          </div>
+        <section className="flex flex-col gap-4">
+          <ResultIntel
+            title="Search summary"
+            query={submittedQuery}
+            items={results}
+            mode={submittedMode}
+          />
+          {results.length === 0 ? (
+            <div className="rounded-lg border border-line px-4 py-8 text-center text-sm text-muted">
+              No matching chunks were returned for this query.
+            </div>
+          ) : null}
+          <ResultPagination
+            page={page}
+            pageSize={RESULT_PAGE_SIZE}
+            total={results.length}
+            onPageChange={setPage}
+          />
           <div className="flex flex-col gap-3">
-            {results.map((hit, i) => (
+            {visibleResults.map((hit, i) => (
               <EvidenceCard
                 key={hit.chunk_id}
                 item={hit}
                 documentId={id}
-                label={`#${i + 1}`}
+                label={`#${(page - 1) * RESULT_PAGE_SIZE + i + 1}`}
               />
             ))}
           </div>
+          <ResultPagination
+            page={page}
+            pageSize={RESULT_PAGE_SIZE}
+            total={results.length}
+            onPageChange={setPage}
+          />
         </section>
       ) : null}
     </main>

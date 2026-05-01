@@ -60,3 +60,99 @@ body {
 .scroll-target {
   scroll-margin-top: 5rem;
 }
+
+.markdown-preview > * + * {
+  margin-top: 0.75rem;
+}
+
+.markdown-preview h2,
+.markdown-preview h3,
+.markdown-preview h4 {
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.markdown-preview h2 {
+  font-size: 1.15rem;
+}
+
+.markdown-preview h3 {
+  font-size: 1rem;
+}
+
+.markdown-preview h4 {
+  font-size: 0.95rem;
+}
+
+.markdown-preview ul,
+.markdown-preview ol {
+  padding-left: 1.25rem;
+}
+
+.markdown-preview ul {
+  list-style: disc;
+}
+
+.markdown-preview ol {
+  list-style: decimal;
+}
+
+.markdown-preview li + li {
+  margin-top: 0.35rem;
+}
+
+.markdown-preview blockquote {
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+  padding-left: 0.9rem;
+}
+
+.markdown-preview code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.markdown-preview pre {
+  background: color-mix(in srgb, var(--background) 72%, var(--card));
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  overflow-x: auto;
+  padding: 0.85rem;
+}
+
+.markdown-preview table {
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  min-width: 100%;
+}
+
+.markdown-preview th,
+.markdown-preview td {
+  border: 1px solid var(--border);
+  padding: 0.45rem 0.6rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdown-preview th {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  font-weight: 650;
+}
+
+.math-inline {
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  display: inline-block;
+  font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif;
+  padding: 0 0.25rem;
+}
+
+.math-display {
+  background: color-mix(in srgb, var(--background) 70%, var(--card));
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif;
+  font-size: 1.05rem;
+  overflow-x: auto;
+  padding: 0.85rem 1rem;
+  text-align: center;
+}

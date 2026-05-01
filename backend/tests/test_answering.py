@@ -17,6 +17,9 @@ from app.services.answering import (
     EvidencePassage,
     answer_query,
     build_prompt,
+    estimate_answer_score,
+    estimate_confidence,
+    normalize_citation_tokens,
     parse_citations,
 )
 from app.services.lexical_index import get_lexical_index
@@ -102,6 +105,8 @@ async def test_answer_query_returns_cited_answer(
         assert result.evidence, "evidence should not be empty"
         assert result.answer
         assert len(result.citations) >= 1
+        assert 0.0 < result.confidence <= 1.0
+        assert 0.0 < result.answer_score <= 1.0
         assert all(isinstance(c, Citation) for c in result.citations)
         # retrieval_meta has the documented keys.
         for key in ("hit_count", "max_score", "alpha", "top_k", "model"):
@@ -119,6 +124,14 @@ def test_parse_citations_dedupes_and_skips_out_of_range() -> None:
     assert cites[1].chunk_id == "chunk-2"  # [E3] -> passages[2]
 
 
+def test_parse_citations_accepts_invisible_unicode_marks() -> None:
+    passages = [_make_passage(i) for i in range(5)]
+    answer = "foo [\u200bE4\u200b] bar [E5]"
+    cites = parse_citations(answer, passages)
+    assert [c.chunk_id for c in cites] == ["chunk-3", "chunk-4"]
+    assert normalize_citation_tokens(answer) == "foo [E4] bar [E5]"
+
+
 @pytest.mark.asyncio
 async def test_answer_query_insufficient_when_no_hits(
     reset_db: None, monkeypatch: pytest.MonkeyPatch
@@ -133,6 +146,8 @@ async def test_answer_query_insufficient_when_no_hits(
         assert result.answer == INSUFFICIENT_ANSWER
         assert result.citations == []
         assert result.evidence == []
+        assert result.confidence == 0.0
+        assert result.answer_score == 0.0
     finally:
         reset_llm_cache()
 
@@ -187,3 +202,31 @@ def test_build_prompt_caps_context_chars() -> None:
     # User content includes headers + question + footer; allow modest overhead.
     overhead_budget = 800
     assert len(user["content"]) <= MAX_CONTEXT_CHARS + overhead_budget
+
+
+def test_confidence_normalizes_rrf_scores() -> None:
+    passages = [_make_passage(0), _make_passage(1), _make_passage(2)]
+    passages[0].score = 1.0 / 61.0
+    assert estimate_confidence(passages, 2) == pytest.approx(1.0)
+    assert estimate_confidence(passages, 0) < estimate_confidence(passages, 1)
+
+
+def test_answer_score_accounts_for_insufficient_answers() -> None:
+    assert (
+        estimate_answer_score(
+            answer="Insufficient evidence to answer.",
+            confidence=0.8,
+            citation_count=2,
+            insufficient=True,
+        )
+        == 0.0
+    )
+    assert (
+        estimate_answer_score(
+            answer="Grounded answer with support. [E1]",
+            confidence=0.8,
+            citation_count=1,
+            insufficient=False,
+        )
+        > 0.0
+    )

@@ -17,11 +17,16 @@ from app.services.retrieval import FusedHit, hybrid_search
 MIN_TOP_SCORE: float = 0.005
 MIN_HITS: int = 1
 MAX_CONTEXT_CHARS: int = 6000
+RRF_TOP_SCORE: float = 1.0 / 61.0
 
 INSUFFICIENT_MARKER: str = "INSUFFICIENT_EVIDENCE"
 INSUFFICIENT_ANSWER: str = "Insufficient evidence to answer."
 
-_CITATION_RE = re.compile(r"\[E(\d+)\]")
+_CITATION_RE = re.compile(
+    r"\[\s*[\u200b-\u200f\u2060\ufeff]*E"
+    r"[\u200b-\u200f\u2060\ufeff]*(\d+)"
+    r"[\u200b-\u200f\u2060\ufeff]*\s*\]"
+)
 
 
 @dataclass(frozen=True)
@@ -60,6 +65,7 @@ class AnswerResult:
     evidence: list[EvidencePassage] = field(default_factory=list)
     insufficient: bool = False
     confidence: float = 0.0
+    answer_score: float = 0.0
     retrieval_meta: dict[str, Any] = field(default_factory=dict)
 
 
@@ -194,16 +200,49 @@ def parse_citations(answer: str, passages: list[EvidencePassage]) -> list[Citati
     return out
 
 
+def normalize_citation_tokens(answer: str) -> str:
+    """Canonicalize model-emitted citation tokens to plain ``[E#]`` form."""
+    return _CITATION_RE.sub(lambda match: f"[E{int(match.group(1))}]", answer)
+
+
+def _clamp01(value: float) -> float:
+    return max(0.0, min(1.0, value))
+
+
 def estimate_confidence(
-    passages: list[EvidencePassage], answer_has_citations: bool
+    passages: list[EvidencePassage], citation_count: int | bool
 ) -> float:
-    """Heuristic: ``min(1, max_rrf*5)`` * (1.0 if cited else 0.5), clipped to [0,1]."""
+    """Estimate confidence from normalized retrieval strength and citation support.
+
+    Hybrid answers use RRF scores, whose useful range is roughly 0..1/61 for
+    the top fused result. Normalize against that range before applying citation
+    and evidence-volume factors so good retrieval does not look artificially
+    weak in the UI.
+    """
     if not passages:
         return 0.0
     max_score = max(p.score for p in passages)
-    base = max(0.0, min(1.0, max_score * 5.0))
-    factor = 1.0 if answer_has_citations else 0.5
-    return max(0.0, min(1.0, base * factor))
+    retrieval_strength = _clamp01(max_score / RRF_TOP_SCORE)
+    cited = int(citation_count)
+    citation_factor = 0.35 + (0.65 * _clamp01(cited / 2.0))
+    evidence_factor = 0.75 + (0.25 * _clamp01(len(passages) / 3.0))
+    return _clamp01(retrieval_strength * citation_factor * evidence_factor)
+
+
+def estimate_answer_score(
+    *,
+    answer: str,
+    confidence: float,
+    citation_count: int,
+    insufficient: bool,
+) -> float:
+    """Score answer usability on 0..1 using confidence, citations, and content."""
+    if insufficient or not answer.strip():
+        return 0.0
+    citation_factor = 0.55 + (0.45 * _clamp01(citation_count / 2.0))
+    length_factor = _clamp01(len(answer.strip()) / 160.0)
+    content_factor = 0.8 + (0.2 * length_factor)
+    return _clamp01(confidence * citation_factor * content_factor)
 
 
 def _max_score(hits: list[FusedHit]) -> float:
@@ -245,6 +284,12 @@ async def answer_query(
         "alpha": alpha,
         "top_k": top_k,
         "model": backend.name,
+        "scoring": {
+            "confidence": 0.0,
+            "answer_score": 0.0,
+            "citation_count": 0,
+            "rrf_top_score": RRF_TOP_SCORE,
+        },
     }
 
     insufficient_by_score = max_score < MIN_TOP_SCORE and not _has_dual_signal(hits)
@@ -256,12 +301,13 @@ async def answer_query(
             evidence=passages,
             insufficient=True,
             confidence=0.0,
+            answer_score=0.0,
             retrieval_meta=retrieval_meta,
         )
 
     messages = build_prompt(query, passages)
     raw_answer = await backend.generate(messages, max_tokens=2048, temperature=0.0)
-    answer = (raw_answer or "").strip()
+    answer = normalize_citation_tokens((raw_answer or "").strip())
 
     if answer == INSUFFICIENT_MARKER:
         return AnswerResult(
@@ -271,11 +317,24 @@ async def answer_query(
             evidence=passages,
             insufficient=True,
             confidence=0.0,
+            answer_score=0.0,
             retrieval_meta=retrieval_meta,
         )
 
     citations = parse_citations(answer, passages)
-    confidence = estimate_confidence(passages, bool(citations))
+    confidence = estimate_confidence(passages, len(citations))
+    answer_score = estimate_answer_score(
+        answer=answer,
+        confidence=confidence,
+        citation_count=len(citations),
+        insufficient=False,
+    )
+    retrieval_meta["scoring"] = {
+        "confidence": confidence,
+        "answer_score": answer_score,
+        "citation_count": len(citations),
+        "rrf_top_score": RRF_TOP_SCORE,
+    }
 
     return AnswerResult(
         query=query,
@@ -284,6 +343,7 @@ async def answer_query(
         evidence=passages,
         insufficient=False,
         confidence=confidence,
+        answer_score=answer_score,
         retrieval_meta=retrieval_meta,
     )
 
@@ -295,10 +355,13 @@ __all__ = [
     "MIN_TOP_SCORE",
     "MIN_HITS",
     "MAX_CONTEXT_CHARS",
+    "RRF_TOP_SCORE",
     "INSUFFICIENT_MARKER",
     "INSUFFICIENT_ANSWER",
     "build_prompt",
     "parse_citations",
+    "normalize_citation_tokens",
     "estimate_confidence",
+    "estimate_answer_score",
     "answer_query",
 ]

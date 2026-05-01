@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { PageOut } from "@/lib/api";
 import { ChunksPanel } from "./ChunksPanel";
+import { ResultPagination } from "./ResultPagination";
 
 interface DocumentTabsProps {
   documentId: string;
@@ -12,6 +13,7 @@ interface DocumentTabsProps {
 }
 
 type TabKey = "pages" | "chunks";
+const PAGE_SIZE = 25;
 
 export function DocumentTabs({
   documentId,
@@ -19,6 +21,11 @@ export function DocumentTabs({
   numChunks,
 }: DocumentTabsProps): React.JSX.Element {
   const [tab, setTab] = useState<TabKey>("pages");
+  const [page, setPage] = useState<number>(1);
+  const visiblePages = useMemo(() => {
+    const start = (page - 1) * PAGE_SIZE;
+    return pages.slice(start, start + PAGE_SIZE);
+  }, [page, pages]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -40,7 +47,15 @@ export function DocumentTabs({
           {pages.length === 0 ? (
             <p className="text-sm text-muted">No pages yet.</p>
           ) : null}
-          {pages.map((p) => (
+          <ResultPagination
+            ariaLabel="Pages pagination"
+            itemLabel="pages"
+            page={page}
+            pageSize={PAGE_SIZE}
+            total={pages.length}
+            onPageChange={setPage}
+          />
+          {visiblePages.map((p) => (
             <article
               key={p.page_number}
               className="surface-card rounded-lg border p-4"
@@ -64,6 +79,14 @@ export function DocumentTabs({
               </footer>
             </article>
           ))}
+          <ResultPagination
+            ariaLabel="Pages pagination"
+            itemLabel="pages"
+            page={page}
+            pageSize={PAGE_SIZE}
+            total={pages.length}
+            onPageChange={setPage}
+          />
         </div>
       ) : (
         <ChunksPanel documentId={documentId} totalChunks={numChunks} />

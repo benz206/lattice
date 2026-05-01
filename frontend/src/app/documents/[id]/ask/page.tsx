@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { use, useState } from "react";
+import { ActivityRail, type ActivityStep } from "@/components/ActivityRail";
 import { AppHeader } from "@/components/AppHeader";
 import { AnswerView } from "@/components/AnswerView";
 import { Spinner } from "@/components/Spinner";
@@ -18,6 +19,49 @@ interface Turn {
   response: AnswerResponse | null;
   error: string | null;
   pending: boolean;
+}
+
+function answerSteps(turn: Turn): ActivityStep[] {
+  const failed = Boolean(turn.error);
+  const done = Boolean(turn.response);
+  const activeState = failed ? "error" : turn.pending ? "active" : done ? "done" : "waiting";
+  const response = turn.response;
+  return [
+    {
+      label: "Question",
+      detail: "Captured and scoped to this document.",
+      state: failed || turn.pending || done ? "done" : "waiting",
+      metric: `top_k ${turn.top_k}`,
+    },
+    {
+      label: "Evidence",
+      detail: response
+        ? `Fetched ${response.evidence.length} passages across source pages.`
+        : "Fetching ranked chunks and page spans.",
+      state: activeState,
+      metric: response ? `${response.evidence.length} hits` : undefined,
+    },
+    {
+      label: "Scoring",
+      detail: response
+        ? `Confidence ${response.confidence.toFixed(2)} and answer score ${response.answer_score.toFixed(2)}.`
+        : "Normalizing retrieval, citation, and answer signals.",
+      state: response ? "done" : activeState,
+      metric: response ? response.answer_score.toFixed(2) : undefined,
+    },
+    {
+      label: "Answer",
+      detail: failed
+        ? turn.error ?? "Request failed."
+        : response
+          ? response.insufficient
+            ? "Insufficient evidence state is visible."
+            : "Answer, citations, LaTeX previews, and evidence are visible."
+          : "Composing grounded answer.",
+      state: failed ? "error" : response ? "done" : turn.pending ? "active" : "waiting",
+      metric: response ? `${response.citations.length} cites` : undefined,
+    },
+  ];
 }
 
 export default function AskPage({ params }: PageProps): React.JSX.Element {
@@ -74,8 +118,15 @@ export default function AskPage({ params }: PageProps): React.JSX.Element {
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col gap-6 px-6 py-8">
       <AppHeader subtitle="Ask" />
 
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">Ask a question</h1>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Ask a question</h1>
+          <p className="mt-1 max-w-2xl text-sm text-muted">
+            Lattice retrieves evidence first, then asks the model to answer only
+            from those passages. Each turn shows the answer, citations, retrieval
+            metadata, and paginated source evidence.
+          </p>
+        </div>
         <Link
           href={`/documents/${id}`}
           className="text-sm text-[color:var(--accent)] hover:underline"
@@ -86,7 +137,7 @@ export default function AskPage({ params }: PageProps): React.JSX.Element {
 
       <form
         onSubmit={onSubmit}
-        className="surface-card flex flex-col gap-3 rounded-xl border p-4"
+        className="surface-card flex flex-col gap-4 rounded-lg border p-4"
       >
         <textarea
           value={query}
@@ -95,18 +146,18 @@ export default function AskPage({ params }: PageProps): React.JSX.Element {
           rows={3}
           className="w-full resize-y rounded-md border border-line bg-[color:var(--background)] px-3 py-2 text-sm focus:border-[color:var(--accent)] focus:outline-none"
         />
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-end justify-between gap-3">
           <label className="flex items-center gap-2 text-xs text-muted">
-            top_k
+            evidence depth
             <input
               type="number"
               min={3}
-              max={20}
+              max={50}
               value={topK}
               onChange={(e) => {
                 const n = Number.parseInt(e.target.value, 10);
                 if (Number.isFinite(n)) {
-                  setTopK(Math.max(3, Math.min(20, n)));
+                  setTopK(Math.max(3, Math.min(50, n)));
                 }
               }}
               className="w-16 rounded-md border border-line bg-[color:var(--background)] px-2 py-1 text-center text-xs"
@@ -133,12 +184,23 @@ export default function AskPage({ params }: PageProps): React.JSX.Element {
         {turns.map((t) => (
           <section key={t.id} className="flex flex-col gap-4">
             <div className="surface-card rounded-lg border p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted">
-                Question
-              </p>
-              <p className="mt-1 whitespace-pre-wrap text-sm">{t.query}</p>
-              <p className="mt-2 text-[11px] text-muted">top_k {t.top_k}</p>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+                    Question
+                  </p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm">{t.query}</p>
+                </div>
+                <div className="rounded-md border border-line px-3 py-2 text-right">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+                    Evidence depth
+                  </p>
+                  <p className="text-sm font-medium">{t.top_k}</p>
+                </div>
+              </div>
             </div>
+
+            <ActivityRail title="Answer pipeline" steps={answerSteps(t)} />
 
             {t.pending ? (
               <div className="inline-flex items-center gap-2 text-sm text-muted">

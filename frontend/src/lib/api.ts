@@ -136,6 +136,7 @@ export interface AnswerResponse {
   evidence: Evidence[];
   insufficient: boolean;
   confidence: number;
+  answer_score: number;
   retrieval_meta: RetrievalMeta;
 }
 

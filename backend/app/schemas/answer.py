@@ -51,6 +51,7 @@ class AnswerResponse(BaseModel):
     evidence: list[EvidenceOut]
     insufficient: bool
     confidence: float
+    answer_score: float
     retrieval_meta: dict[str, Any]
 
 

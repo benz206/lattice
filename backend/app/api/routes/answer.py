@@ -50,6 +50,7 @@ async def post_answer(body: AnswerRequest) -> AnswerResponse:
         ],
         insufficient=result.insufficient,
         confidence=result.confidence,
+        answer_score=result.answer_score,
         retrieval_meta=result.retrieval_meta,
     )
 

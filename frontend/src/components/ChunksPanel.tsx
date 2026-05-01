@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { listChunks, type ChunkOut } from "@/lib/api";
+import { ResultPagination } from "./ResultPagination";
 import { Spinner } from "./Spinner";
 
 interface ChunksPanelProps {
@@ -16,25 +17,21 @@ export function ChunksPanel({
   totalChunks,
 }: ChunksPanelProps): React.JSX.Element {
   const [chunks, setChunks] = useState<ChunkOut[]>([]);
-  const [offset, setOffset] = useState<number>(0);
+  const [page, setPage] = useState<number>(1);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState<boolean>(false);
 
   const load = useCallback(
-    async (start: number) => {
+    async (nextPage: number) => {
       setLoading(true);
       setError(null);
       try {
+        const start = (nextPage - 1) * PAGE_SIZE;
         const batch = await listChunks(documentId, {
           limit: PAGE_SIZE,
           offset: start,
         });
-        setChunks((prev) => (start === 0 ? batch : [...prev, ...batch]));
-        setOffset(start + batch.length);
-        if (batch.length < PAGE_SIZE) {
-          setDone(true);
-        }
+        setChunks(batch);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to load chunks");
       } finally {
@@ -45,8 +42,11 @@ export function ChunksPanel({
   );
 
   useEffect(() => {
-    void load(0);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void load(page);
+  }, [load, page]);
+
+  useEffect(() => {
+    setPage(1);
   }, [documentId]);
 
   if (error) {
@@ -61,7 +61,7 @@ export function ChunksPanel({
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between text-xs text-muted">
         <span>
-          Showing {chunks.length} of {totalChunks} chunks
+          Page {page} · {chunks.length} visible · {totalChunks} total chunks
         </span>
         {loading ? (
           <span className="inline-flex items-center gap-2">
@@ -69,6 +69,15 @@ export function ChunksPanel({
           </span>
         ) : null}
       </div>
+
+      <ResultPagination
+        ariaLabel="Chunks pagination"
+        itemLabel="chunks"
+        page={page}
+        pageSize={PAGE_SIZE}
+        total={totalChunks}
+        onPageChange={setPage}
+      />
 
       <div className="flex flex-col gap-3">
         {chunks.map((c) => (
@@ -118,18 +127,14 @@ export function ChunksPanel({
         ))}
       </div>
 
-      {!done ? (
-        <button
-          type="button"
-          disabled={loading}
-          onClick={() => void load(offset)}
-          className="self-center rounded-md border border-line px-4 py-2 text-sm hover:bg-[color:var(--card)] disabled:opacity-50"
-        >
-          Load more
-        </button>
-      ) : (
-        <p className="self-center text-xs text-muted">All chunks loaded.</p>
-      )}
+      <ResultPagination
+        ariaLabel="Chunks pagination"
+        itemLabel="chunks"
+        page={page}
+        pageSize={PAGE_SIZE}
+        total={totalChunks}
+        onPageChange={setPage}
+      />
     </div>
   );
 }

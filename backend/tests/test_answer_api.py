@@ -57,6 +57,7 @@ def _assert_answer_shape(body: dict[str, Any]) -> None:
         "evidence",
         "insufficient",
         "confidence",
+        "answer_score",
         "retrieval_meta",
     ):
         assert key in body, f"missing key {key} in answer body"
