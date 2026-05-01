@@ -29,10 +29,10 @@ export function HealthBadge(): React.JSX.Element {
 
   const label: string =
     status === "loading"
-      ? "backend: checking..."
+      ? "api: checking..."
       : status === "ok"
-        ? "backend: ok"
-        : "backend: unreachable";
+        ? "api: ok"
+        : "api: unreachable";
 
   const color: string =
     status === "ok"

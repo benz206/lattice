@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { BACKEND_URL, type DocumentOut, formatBytes } from "@/lib/api";
+import { API_BASE_URL, type DocumentOut, formatBytes } from "@/lib/api";
 import { Spinner } from "./Spinner";
 
 const MAX_WARN_BYTES = 200 * 1024 * 1024;
@@ -64,7 +64,7 @@ export function UploadDropzone(): React.JSX.Element {
     form.append("file", file);
 
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", `${BACKEND_URL}/api/documents`);
+    xhr.open("POST", `${API_BASE_URL}/api/documents`);
 
     xhr.upload.addEventListener("progress", (event) => {
       if (event.lengthComputable) {

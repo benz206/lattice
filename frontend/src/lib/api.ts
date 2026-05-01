@@ -1,5 +1,4 @@
-export const BACKEND_URL: string =
-  process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
+export const API_BASE_URL = "";
 
 export type Status = "pending" | "processing" | "ready" | "failed";
 export type SearchMode = "hybrid" | "vector" | "lexical";
@@ -158,7 +157,7 @@ export class ApiError extends Error {
 }
 
 export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const url = path.startsWith("http") ? path : `${BACKEND_URL}${path}`;
+  const url = path.startsWith("http") ? path : `${API_BASE_URL}${path}`;
   const headers: Record<string, string> = {
     Accept: "application/json",
     ...(init?.headers as Record<string, string> | undefined),
