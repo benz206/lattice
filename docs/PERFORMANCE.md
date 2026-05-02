@@ -19,6 +19,26 @@ rankings. For small and medium local corpora this should be comfortably
 interactive. Very large corpora will eventually want a database/vector index
 again, but without a separate service boundary.
 
+Retrieval timing is available through `searchChunksWithMeta`, while the
+existing `searchChunks` API remains unchanged. `answerQuery` includes
+`retrieval_meta.timing_ms` with phase timings such as `load_chunks`,
+`vector_search`, `lexical_search`, `fuse_results`, and `search_total`.
+
+Run the lightweight retrieval benchmark against existing ready chunks:
+
+```sh
+bun scripts/benchmark-retrieval.ts --query "What is this document about?"
+```
+
+Useful options:
+
+- `--mode hybrid|vector|lexical` selects the retrieval mode.
+- `--top-k 8` controls returned hits.
+- `--document-id <id>` restricts the run to one document.
+- Repeat `--query "..."` to run a small query set.
+
+If no ready chunks exist, the benchmark exits cleanly with an ingestion hint.
+
 Answer latency is dominated by the configured LLM endpoint. With
 `LATTICE_LLM=stub`, answers are immediate and deterministic. With Ollama or a
 hosted OpenAI-compatible provider, latency follows that provider and model.

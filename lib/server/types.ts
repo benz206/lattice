@@ -37,6 +37,39 @@ export interface ChunkRecord {
   embedding: number[];
 }
 
+export interface RetrievalIndexMetadata {
+  version: number;
+  document_id: string;
+  created_at: string;
+  chunk_count: number;
+  chunk_format_version: number;
+  tokenizer: string;
+  embedder_model: string;
+}
+
+export interface RetrievalIndexChunk {
+  chunk_id: string;
+  ordinal: number;
+  document_length: number;
+  tokens: string[];
+  term_frequencies: Record<string, number>;
+}
+
+export interface RetrievalIndexPosting {
+  chunk_id: string;
+  ordinal: number;
+  term_frequency: number;
+}
+
+export interface RetrievalIndex {
+  metadata: RetrievalIndexMetadata;
+  document_count: number;
+  average_document_length: number;
+  document_frequencies: Record<string, number>;
+  chunks: RetrievalIndexChunk[];
+  inverted_index: Record<string, RetrievalIndexPosting[]>;
+}
+
 export interface DocumentMapSection {
   title: string | null;
   chunk_ordinal_start: number;

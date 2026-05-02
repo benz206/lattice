@@ -156,8 +156,20 @@ export class ApiError extends Error {
   }
 }
 
+async function resolveUrl(path: string): Promise<string> {
+  if (path.startsWith("http://") || path.startsWith("https://")) return path;
+  if (typeof window !== "undefined") return `${API_BASE_URL}${path}`;
+  const { headers } = await import("next/headers");
+  const h = await headers();
+  const host = h.get("host") ?? `localhost:${process.env.PORT ?? 3000}`;
+  const proto =
+    h.get("x-forwarded-proto") ??
+    (host.startsWith("localhost") || host.startsWith("127.") ? "http" : "https");
+  return `${proto}://${host}${path}`;
+}
+
 export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const url = path.startsWith("http") ? path : `${API_BASE_URL}${path}`;
+  const url = await resolveUrl(path);
   const headers: Record<string, string> = {
     Accept: "application/json",
     ...(init?.headers as Record<string, string> | undefined),
@@ -249,6 +261,13 @@ export function deleteDocument(id: string): Promise<void> {
 export function pollStatus(id: string): Promise<DocumentStatusResponse> {
   return fetchJson<DocumentStatusResponse>(
     `/api/documents/${encodeURIComponent(id)}/status`,
+  );
+}
+
+export function retryDocument(id: string): Promise<DocumentStatusResponse> {
+  return fetchJson<DocumentStatusResponse>(
+    `/api/documents/${encodeURIComponent(id)}/retry`,
+    { method: "POST" },
   );
 }
 

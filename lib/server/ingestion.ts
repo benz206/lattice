@@ -3,8 +3,9 @@ import path from "node:path";
 import { embedTexts } from "./embedding";
 import { buildDocumentMap, chunkPages, toChunkRecords } from "./chunking";
 import { extractPages } from "./pdf";
+import { buildRetrievalIndex } from "./retrieval-index";
 import { settings } from "./settings";
-import { withStore, writeChunks, writePages } from "./store";
+import { withStore, writeChunks, writePages, writeRetrievalIndex } from "./store";
 import type { DocumentRecord } from "./types";
 
 function now(): string {
@@ -81,8 +82,13 @@ export async function ingestDocument(documentId: string): Promise<void> {
       chunk.embedding = embeddings[index] ?? [];
     });
     const documentMap = buildDocumentMap(chunkData);
+    const retrievalIndex = buildRetrievalIndex(document.id, chunks);
 
-    await Promise.all([writePages(document.id, pages), writeChunks(document.id, chunks)]);
+    await Promise.all([
+      writePages(document.id, pages),
+      writeChunks(document.id, chunks),
+      writeRetrievalIndex(document.id, retrievalIndex),
+    ]);
 
     const ready: DocumentRecord = {
       ...document,

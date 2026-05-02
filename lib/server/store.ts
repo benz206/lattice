@@ -1,7 +1,12 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { settings } from "./settings";
-import type { ChunkRecord, DocumentRecord, PageRecord } from "./types";
+import type {
+  ChunkRecord,
+  DocumentRecord,
+  PageRecord,
+  RetrievalIndex,
+} from "./types";
 
 interface DbShape {
   documents: DocumentRecord[];
@@ -92,6 +97,10 @@ function chunksPath(documentId: string): string {
   return path.join(settings.dataDir, "chunks", `${documentId}.json`);
 }
 
+export function retrievalIndexPath(documentId: string): string {
+  return path.join(settings.dataDir, "indexes", `${documentId}.json`);
+}
+
 export async function readPages(documentId: string): Promise<PageRecord[]> {
   try {
     const raw = await fs.readFile(pagesPath(documentId), "utf8");
@@ -147,10 +156,35 @@ export async function writeChunks(
   await fs.writeFile(chunksPath(documentId), JSON.stringify(chunks, null, 2));
 }
 
+export async function readRetrievalIndex(
+  documentId: string,
+): Promise<RetrievalIndex | null> {
+  try {
+    const raw = await fs.readFile(retrievalIndexPath(documentId), "utf8");
+    return JSON.parse(raw) as RetrievalIndex;
+  } catch {
+    return null;
+  }
+}
+
+export async function writeRetrievalIndex(
+  documentId: string,
+  index: RetrievalIndex,
+): Promise<void> {
+  const filePath = retrievalIndexPath(documentId);
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, JSON.stringify(index, null, 2));
+}
+
+export async function deleteRetrievalIndex(documentId: string): Promise<void> {
+  await fs.unlink(retrievalIndexPath(documentId)).catch(() => undefined);
+}
+
 export async function deleteDocumentFiles(document: DocumentRecord): Promise<void> {
   await Promise.allSettled([
     fs.unlink(document.storage_path),
     fs.unlink(pagesPath(document.id)),
     fs.unlink(chunksPath(document.id)),
+    deleteRetrievalIndex(document.id),
   ]);
 }

@@ -6,6 +6,7 @@ import { DocumentMap } from "@/components/DocumentMap";
 import { DocumentTabs } from "@/components/DocumentTabs";
 import { IngestionProgress } from "@/components/IngestionProgress";
 import { RefreshButton } from "@/components/RefreshButton";
+import { RetryDocumentButton } from "@/components/RetryDocumentButton";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
   ApiError,
@@ -73,6 +74,9 @@ export default async function DocumentDetailPage({
           </div>
           <div className="flex items-center gap-2">
             <RefreshButton />
+            {detail.status === "failed" ? (
+              <RetryDocumentButton documentId={detail.id} />
+            ) : null}
             <Link
               href={`/documents/${detail.id}/search`}
               className="inline-flex items-center rounded-md border border-line px-3 py-1.5 text-sm hover:bg-[color:var(--card)]"

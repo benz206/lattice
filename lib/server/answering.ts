@@ -1,7 +1,8 @@
 import { embedderName } from "./embedding";
 import { settings } from "./settings";
-import { searchChunks } from "./retrieval";
+import { searchChunksWithMeta } from "./retrieval";
 import type { FusedHit } from "./types";
+import { packEvidence, type EvidencePassage } from "./evidence-packing";
 
 const minTopScore = 0.005;
 const maxContextChars = 6000;
@@ -9,17 +10,6 @@ const rrfTopScore = 1 / 61;
 const insufficientMarker = "INSUFFICIENT_EVIDENCE";
 const insufficientAnswer = "Insufficient evidence to answer.";
 const citationRe = /\[\s*[\u200b-\u200f\u2060\ufeff]*E[\u200b-\u200f\u2060\ufeff]*(\d+)[\u200b-\u200f\u2060\ufeff]*\s*\]/g;
-
-interface EvidencePassage {
-  chunk_id: string;
-  document_id: string;
-  ordinal: number;
-  page_start: number;
-  page_end: number;
-  section_title: string | null;
-  text: string;
-  score: number;
-}
 
 function passageFromHit(hit: FusedHit): EvidencePassage {
   return {
@@ -32,31 +22,6 @@ function passageFromHit(hit: FusedHit): EvidencePassage {
     text: hit.text,
     score: hit.rrf_score,
   };
-}
-
-function truncateAtBoundary(text: string, maxLen: number): string {
-  if (text.length <= maxLen) return text;
-  const cut = text.slice(0, maxLen);
-  const space = cut.lastIndexOf(" ");
-  return cut.slice(0, space > maxLen * 0.5 ? space : maxLen).trimEnd();
-}
-
-function capPassages(passages: EvidencePassage[]): EvidencePassage[] {
-  const out: EvidencePassage[] = [];
-  let used = 0;
-  for (const passage of passages) {
-    const remaining = maxContextChars - used;
-    if (remaining <= 0) break;
-    if (passage.text.length <= remaining) {
-      out.push(passage);
-      used += passage.text.length;
-    } else {
-      const text = truncateAtBoundary(passage.text, remaining);
-      if (text) out.push({ ...passage, text });
-      break;
-    }
-  }
-  return out;
 }
 
 function normalizeCitationTokens(answer: string): string {
@@ -98,7 +63,11 @@ function estimateConfidence(passages: EvidencePassage[], citationCount: number):
   return clamp01(retrievalStrength * citationFactor * evidenceFactor);
 }
 
-async function generateWithLlm(query: string, passages: EvidencePassage[]): Promise<string> {
+async function generateWithLlm(
+  query: string,
+  passages: EvidencePassage[],
+  anchorText: string | null,
+): Promise<string> {
   if (settings.llmOverride === "stub" || settings.llmBackend === "stub") {
     const first = passages[0];
     return first
@@ -113,6 +82,7 @@ async function generateWithLlm(query: string, passages: EvidencePassage[]): Prom
   const evidence = passages
     .map((passage, index) => `[E${index + 1}] (chunk=${passage.chunk_id} doc=${passage.document_id} pages=${passage.page_start}-${passage.page_end})\n${passage.text}`)
     .join("\n\n");
+  const anchors = anchorText ? `\n\n${anchorText}` : "";
   const response = await fetch(`${settings.llmBaseUrl.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
     headers: {
@@ -133,7 +103,7 @@ async function generateWithLlm(query: string, passages: EvidencePassage[]): Prom
         },
         {
           role: "user",
-          content: `QUESTION: ${query}\n\nEVIDENCE:\n${evidence}\n\nWrite a concise answer with citations.`,
+          content: `QUESTION: ${query}\n\nEVIDENCE:\n${evidence}${anchors}\n\nWrite a concise answer with citations.`,
         },
       ],
     }),
@@ -154,20 +124,34 @@ export async function answerQuery({
   topK?: number;
   documentId?: string | null;
 }) {
-  const hits = await searchChunks({
+  const { hits, meta: searchMeta } = await searchChunksWithMeta({
     query,
     mode: "hybrid",
     topK,
     documentId,
   });
-  const passages = capPassages(hits.map(passageFromHit));
+  const packedEvidence = packEvidence(hits.map(passageFromHit), query, maxContextChars);
+  const passages = packedEvidence.passages;
   const maxScore = Math.max(0, ...hits.map((hit) => hit.rrf_score));
   const retrievalMeta = {
     hit_count: hits.length,
+    chunk_count: searchMeta.chunk_count,
+    raw_hit_count: hits.length,
+    packed_passage_count: passages.length,
+    context_chars: packedEvidence.contextChars,
+    raw_context_chars: packedEvidence.rawContextChars,
+    deduplicated_chars: packedEvidence.deduplicatedChars,
+    max_context_chars: maxContextChars,
+    evidence_packing: {
+      strategy: "query_focused_sentence_windows_with_dedup",
+      anchor_chars: packedEvidence.anchorText?.length ?? 0,
+    },
     max_score: maxScore,
     alpha: 0.5,
     top_k: topK,
+    mode: searchMeta.mode,
     model: settings.llmBackend === "openai_compat" ? settings.llmModel : embedderName(),
+    timing_ms: searchMeta.timing_ms,
     scoring: {
       confidence: 0,
       answer_score: 0,
@@ -196,7 +180,7 @@ export async function answerQuery({
     };
   }
 
-  const answer = normalizeCitationTokens(await generateWithLlm(query, passages));
+  const answer = normalizeCitationTokens(await generateWithLlm(query, passages, packedEvidence.anchorText));
   if (answer === insufficientMarker) {
     return {
       query,
