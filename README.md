@@ -2,7 +2,7 @@
 
 Small-model evidence retrieval for long documents.
 
-Lattice is a full-stack monorepo for turning large documents into grounded, searchable evidence. It is designed around a simple idea: instead of asking a weak model to “understand” a 1000-page book end-to-end, first build a strong retrieval layer that finds the exact passages needed to answer hard questions.
+Lattice is a full-stack Next.js project for turning large documents into grounded, searchable evidence. It is designed around a simple idea: instead of asking a weak model to “understand” a 1000-page book end-to-end, first build a strong retrieval layer that finds the exact passages needed to answer hard questions.
 
 ## Overview
 
@@ -46,7 +46,7 @@ That shift is the project’s core framing.
 
 1. **Ingest.** PDFs are parsed by the Next.js server using local `pdftotext` when available, split into overlapping section-aware chunks, enriched with a short summary + keywords, and persisted to local JSON data files.
 2. **Index.** Each chunk is embedded with a local deterministic hash embedder by default, or an OpenAI-compatible embeddings endpoint when configured. Lexical BM25-style scoring is computed over the same chunks.
-3. **Retrieve.** Queries hit both retrievers and fuse via reciprocal rank fusion (RRF) with α-weighted blending. Vector-only / lexical-only modes are also exposed for inspection.
+3. **Retrieve.** Queries hit both retrievers and fuse via reciprocal rank fusion (RRF), then rerank/diversify the fused results. Vector-only / lexical-only modes are also exposed for inspection.
 4. **Answer.** The top-k passages are capped to a context budget and passed to a local LLM (default `Qwen2.5-1.5B-Instruct`), which must cite supporting passages with `[E#]`. Weak retrieval or an explicit `INSUFFICIENT_EVIDENCE` reply maps to a canonical "not enough evidence" response.
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full pipeline and [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) for latency/storage expectations and tuning knobs.
@@ -87,8 +87,11 @@ Lattice will be available at `http://localhost:3000`.
 | ------------------------------------ | ------------------------------------- |
 | `bash scripts/setup.sh`              | Install dependencies with Bun         |
 | `bash scripts/dev.sh`                | Run the Next.js app                   |
+| `bun run build`                      | Build the production app              |
+| `bun run start`                      | Start the production app              |
 | `bun run typecheck`                  | TypeScript type-check                 |
 | `bun run lint`                       | ESLint                                |
+| `bun scripts/benchmark-retrieval.ts` | Benchmark retrieval over ready chunks |
 
 ## Configuration
 
@@ -96,20 +99,22 @@ Everything is env-driven through `.env` (see `.env.example` for the full list). 
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `EMBEDDING_MODEL` | `hash-local` | Hosted embedding model name when using OpenAI-compatible embeddings. |
+| `FRONTEND_PORT` | `3000` | Port used by `scripts/dev.sh`. |
+| `DATA_DIR` | `./data` | Local JSON metadata, pages, chunks, and retrieval indexes. |
+| `UPLOAD_DIR` | `./data/uploads` | Raw PDF upload storage. |
 | `LATTICE_EMBEDDER` | `hash` | Embedder backend: `hash`, `openrouter`, or `openai_compat`. |
+| `EMBEDDING_MODEL` | `hash-local` | Hosted embedding model name when using OpenAI-compatible embeddings. |
 | `LATTICE_EMBEDDING_BASE_URL` | `https://openrouter.ai/api/v1` | OpenAI-compatible embeddings endpoint. |
 | `LATTICE_EMBEDDING_API_KEY` | unset | Bearer token for hosted embedding providers. Falls back to `LATTICE_LLM_API_KEY` if unset. |
+| `LATTICE_EMBED_BATCH_SIZE` | `16` | Batch size for hosted embedding requests. |
 | `LLM_MODEL` | `qwen2.5:1.5b-instruct` | Model used for answer generation. |
 | `LLM_BACKEND` | `openai_compat` | `openai_compat` or `stub`. |
 | `LATTICE_LLM_BASE_URL` | `http://localhost:11434/v1` | OpenAI-compatible endpoint (Ollama by default). |
 | `LATTICE_LLM_API_KEY` | unset | Bearer token for hosted OpenAI-compatible providers. |
 | `LATTICE_LLM_HTTP_REFERER` | unset | Optional `HTTP-Referer` header for OpenRouter rankings/analytics. |
 | `LATTICE_LLM_APP_TITLE` | `Lattice` | Optional `X-Title` header for OpenRouter rankings/analytics. |
-| `INFERENCE_DEVICE` | `auto` | `cpu` / `mps` / `cuda` / `auto`. |
+| `LATTICE_LLM` | unset | Set to `stub` to skip the real LLM and return deterministic cited answers. |
 | `MAX_UPLOAD_MB` | `200` | Server-side upload cap. |
-| `LATTICE_EMBEDDER=hash` | `hash` | Use the deterministic local embedder. |
-| `LATTICE_LLM=stub` | unset | Skip the real LLM and return deterministic cited answers. |
 
 ## Running a local LLM via Ollama
 
@@ -164,10 +169,23 @@ embeddings are regenerated with the new model dimensions.
 
 ```text
 lattice/
-├── src/                  # Next.js 16 app, API routes, UI, server pipeline
+├── app/                  # Next.js App Router pages and API route handlers
+│   ├── api/              # documents, search, answer, health endpoints
+│   ├── documents/        # document library, detail, search, ask, page views
+│   └── upload/           # PDF upload UI
+├── components/           # Shared React UI components
+├── lib/
+│   ├── api.ts            # Client/server fetch helpers and shared API types
+│   └── server/           # Ingestion, storage, extraction, retrieval, answering
+├── docs/                 # Architecture and performance notes
+├── scripts/              # setup, dev, and retrieval benchmark scripts
+├── data/                 # Local runtime data; ignored by Git
+│   ├── uploads/          # Raw PDFs
+│   ├── pages/            # Extracted page text
+│   ├── chunks/           # Chunk records and embeddings
+│   └── indexes/          # Retrieval indexes, created on ingestion
 ├── package.json          # Bun scripts and Next.js dependencies
-├── docs/                 # ARCHITECTURE.md, PERFORMANCE.md
-└── scripts/              # setup.sh, dev.sh
+└── .env.example          # Environment template
 ```
 
 ## Limitations
