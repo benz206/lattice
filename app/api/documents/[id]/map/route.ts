@@ -16,7 +16,15 @@ export async function GET(_request: Request, context: RouteContext): Promise<Res
     if (!document.document_map) {
       throw new HttpError(404, "Document map not available.");
     }
-    return json(document.document_map);
+    const { sections, ...rest } = document.document_map;
+    return json({
+      ...rest,
+      sections: sections.map((section) => {
+        const stripped: Record<string, unknown> = { ...section };
+        delete stripped.summary_embedding;
+        return stripped;
+      }),
+    });
   } catch (error) {
     return handleRouteError(error);
   }

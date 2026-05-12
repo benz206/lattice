@@ -103,6 +103,16 @@ export function ResultIntel({
           <span>max score {Number(answer.retrieval_meta.max_score ?? 0).toFixed(3)}</span>
           <span>score {answer.answer_score.toFixed(2)}</span>
           <span>{answer.insufficient ? "insufficient evidence" : "answer composed"}</span>
+          {answer.reflection?.enabled && answer.reflection.sentences_dropped > 0 ? (
+            <span className="text-amber-400">
+              reflection dropped {answer.reflection.sentences_dropped}/
+              {answer.reflection.sentences_total} sentence
+              {answer.reflection.sentences_total === 1 ? "" : "s"}
+            </span>
+          ) : null}
+          {answer.reflection?.reflection_triggered_requery ? (
+            <span className="text-amber-400">requery suggested</span>
+          ) : null}
         </div>
       ) : null}
     </section>

@@ -9,7 +9,11 @@ const maxContextChars = 6000;
 const rrfTopScore = 1 / 61;
 const insufficientMarker = "INSUFFICIENT_EVIDENCE";
 const insufficientAnswer = "Insufficient evidence to answer.";
-const citationRe = /\[\s*[\u200b-\u200f\u2060\ufeff]*E[\u200b-\u200f\u2060\ufeff]*(\d+)[\u200b-\u200f\u2060\ufeff]*\s*\]/g;
+const citationRe = /\[\s*[​-‏⁠﻿]*E[​-‏⁠﻿]*(\d+)[​-‏⁠﻿]*\s*\]/g;
+// OpenAI file_search–style annotations, e.g. 【E2†L1-L3】 or 【E2†source】.
+const openAiAnnotationRe = /【\s*E\s*(\d+)\s*(?:†[^】]*)?】/g;
+
+const reflectionEnabled = process.env.LATTICE_REFLECTION !== "off";
 
 function passageFromHit(hit: FusedHit): EvidencePassage {
   return {
@@ -25,7 +29,9 @@ function passageFromHit(hit: FusedHit): EvidencePassage {
 }
 
 function normalizeCitationTokens(answer: string): string {
-  return answer.replace(citationRe, (_match, index: string) => `[E${Number.parseInt(index, 10)}]`);
+  return answer
+    .replace(openAiAnnotationRe, (_match, index: string) => `[E${Number.parseInt(index, 10)}]`)
+    .replace(citationRe, (_match, index: string) => `[E${Number.parseInt(index, 10)}]`);
 }
 
 function parseCitations(answer: string, passages: EvidencePassage[]) {
@@ -99,7 +105,7 @@ async function generateWithLlm(
         {
           role: "system",
           content:
-            "Answer only using the evidence. Cite support as [E#]. If evidence is insufficient, reply INSUFFICIENT_EVIDENCE.",
+            "Answer only using the evidence. Cite support as [E#] using ASCII square brackets only — do not use 【E#†...】 or any other annotation format. If evidence is insufficient, reply INSUFFICIENT_EVIDENCE.",
         },
         {
           role: "user",
@@ -113,6 +119,114 @@ async function generateWithLlm(
     choices?: Array<{ message?: { content?: string } }>;
   };
   return body.choices?.[0]?.message?.content?.trim() ?? "";
+}
+
+function splitSentences(text: string): string[] {
+  // Split on sentence-ending punctuation followed by a space, keeping the delimiter with the preceding sentence
+  const parts: string[] = [];
+  let start = 0;
+  for (let i = 0; i < text.length - 1; i++) {
+    if ((text[i] === "." || text[i] === "?" || text[i] === "!") && text[i + 1] === " ") {
+      parts.push(text.slice(start, i + 1));
+      start = i + 2;
+    }
+  }
+  const tail = text.slice(start).trim();
+  if (tail) parts.push(tail);
+  return parts.filter((s) => s.trim().length > 0);
+}
+
+function extractCitationIndices(sentence: string): number[] {
+  const indices: number[] = [];
+  for (const match of sentence.matchAll(citationRe)) {
+    const idx = Number.parseInt(match[1] ?? "", 10);
+    if (Number.isFinite(idx)) indices.push(idx);
+  }
+  return indices;
+}
+
+interface ReflectionResult {
+  answer: string
+  sentences_total: number
+  sentences_dropped: number
+  verifier_calls: number
+  reflection_triggered_requery: boolean
+}
+
+async function runReflection(
+  answer: string,
+  passages: EvidencePassage[],
+  confidence: number,
+): Promise<ReflectionResult> {
+  const isStub = settings.llmOverride === "stub" || settings.llmBackend === "stub";
+  if (isStub || !reflectionEnabled) {
+    return {
+      answer,
+      sentences_total: 0,
+      sentences_dropped: 0,
+      verifier_calls: 0,
+      reflection_triggered_requery: false,
+    };
+  }
+
+  const sentences = splitSentences(answer);
+  const citedSentences = sentences
+    .map((s, i) => ({ sentence: s, index: i, citations: extractCitationIndices(s) }))
+    .filter((item) => item.citations.length > 0);
+
+  if (citedSentences.length === 0) {
+    return {
+      answer,
+      sentences_total: sentences.length,
+      sentences_dropped: 0,
+      verifier_calls: 0,
+      reflection_triggered_requery: false,
+    };
+  }
+
+  const claimLines = citedSentences.map((item, claimNum) => {
+    const evidenceTexts = item.citations
+      .filter((idx) => idx >= 1 && idx <= passages.length)
+      .map((idx) => passages[idx - 1].text)
+      .join(" ")
+    return `Claim ${claimNum + 1}: "${item.sentence}" Evidence: ${evidenceTexts}`
+  })
+
+  const batchedPrompt = `For each numbered claim below, reply with only "Claim N: YES" or "Claim N: NO" — one per line — indicating whether the evidence supports the claim.\n\n${claimLines.join("\n\n")}`
+
+  const verifierResponse = await generateWithLlm(batchedPrompt, [], null)
+
+  // Parse YES/NO per claim; default to YES on parse failure
+  const verdicts: boolean[] = citedSentences.map(() => true)
+  const lineRe = /Claim\s+(\d+)\s*:\s*(YES|NO)/gi
+  for (const match of verifierResponse.matchAll(lineRe)) {
+    const claimNum = Number.parseInt(match[1] ?? "", 10)
+    const verdict = (match[2] ?? "").toUpperCase() === "YES"
+    if (claimNum >= 1 && claimNum <= verdicts.length) {
+      verdicts[claimNum - 1] = verdict
+    }
+  }
+
+  const droppedIndices = new Set<number>()
+  citedSentences.forEach((item, i) => {
+    if (!verdicts[i]) droppedIndices.add(item.index)
+  })
+
+  const survivingSentences = sentences.filter((_, i) => !droppedIndices.has(i))
+  const cleanedAnswer = survivingSentences.join(" ")
+  const sentencesDropped = droppedIndices.size
+
+  const survivingCited = citedSentences.length - sentencesDropped
+  const requerySurvivorRatio = citedSentences.length > 0 ? survivingCited / citedSentences.length : 1
+  const reflection_triggered_requery = requerySurvivorRatio < 0.5 && confidence < 0.4
+
+  return {
+    answer: cleanedAnswer,
+    sentences_total: sentences.length,
+    sentences_dropped: sentencesDropped,
+    verifier_calls: 1,
+    reflection_triggered_requery,
+  }
 }
 
 export async function answerQuery({
@@ -171,29 +285,46 @@ export async function answerQuery({
     return {
       query,
       answer: insufficientAnswer,
+      raw_answer: insufficientAnswer,
       citations: [],
       evidence: passages,
       insufficient: true,
       confidence: 0,
       answer_score: 0,
       retrieval_meta: retrievalMeta,
+      reflection: {
+        enabled: false,
+        sentences_total: 0,
+        sentences_dropped: 0,
+        verifier_calls: 0,
+        reflection_triggered_requery: false,
+      },
     };
   }
 
-  const answer = normalizeCitationTokens(await generateWithLlm(query, passages, packedEvidence.anchorText));
-  if (answer === insufficientMarker) {
+  const rawAnswer = normalizeCitationTokens(await generateWithLlm(query, passages, packedEvidence.anchorText));
+  if (rawAnswer === insufficientMarker) {
     return {
       query,
       answer: insufficientAnswer,
+      raw_answer: insufficientAnswer,
       citations: [],
       evidence: passages,
       insufficient: true,
       confidence: 0,
       answer_score: 0,
       retrieval_meta: retrievalMeta,
+      reflection: {
+        enabled: false,
+        sentences_total: 0,
+        sentences_dropped: 0,
+        verifier_calls: 0,
+        reflection_triggered_requery: false,
+      },
     };
   }
-  const citations = parseCitations(answer, passages);
+
+  const citations = parseCitations(rawAnswer, passages);
   const confidence = estimateConfidence(passages, citations.length);
   const answerScore = clamp01(confidence * (0.55 + 0.45 * clamp01(citations.length / 2)));
   retrievalMeta.scoring = {
@@ -202,14 +333,40 @@ export async function answerQuery({
     citation_count: citations.length,
     rrf_top_score: rrfTopScore,
   };
+
+  const isStub = settings.llmOverride === "stub" || settings.llmBackend === "stub";
+  const reflectionActive = reflectionEnabled && !isStub;
+  let finalAnswer = rawAnswer;
+  let reflectionMeta = {
+    enabled: reflectionActive,
+    sentences_total: 0,
+    sentences_dropped: 0,
+    verifier_calls: 0,
+    reflection_triggered_requery: false,
+  };
+
+  if (reflectionActive) {
+    const result = await runReflection(rawAnswer, passages, confidence);
+    finalAnswer = result.answer;
+    reflectionMeta = {
+      enabled: true,
+      sentences_total: result.sentences_total,
+      sentences_dropped: result.sentences_dropped,
+      verifier_calls: result.verifier_calls,
+      reflection_triggered_requery: result.reflection_triggered_requery,
+    };
+  }
+
   return {
     query,
-    answer,
+    answer: finalAnswer,
+    raw_answer: rawAnswer,
     citations,
     evidence: passages,
     insufficient: false,
     confidence,
     answer_score: answerScore,
     retrieval_meta: retrievalMeta,
+    reflection: reflectionMeta,
   };
 }

@@ -113,7 +113,7 @@ export default async function DocumentDetailPage({
       ) : null}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[280px_1fr]">
-        <aside className="flex flex-col gap-3 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:self-start lg:overflow-y-auto">
+        <aside className="thin-scrollbar flex flex-col gap-3 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:self-start lg:overflow-y-auto lg:pr-1">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">
             Document map
           </h2>

@@ -46,15 +46,22 @@ async function remoteEmbeddings(texts: string[]): Promise<number[][]> {
   return rows.map(normalize);
 }
 
-export async function embedTexts(texts: string[]): Promise<number[][]> {
+export async function embedTexts(
+  texts: string[],
+  onBatch?: (done: number, total: number) => void,
+): Promise<number[][]> {
+  const total = texts.length;
   if (settings.embedder === "openai_compat" || settings.embedder === "openrouter") {
     const out: number[][] = [];
     for (let i = 0; i < texts.length; i += settings.embedBatchSize) {
       out.push(...(await remoteEmbeddings(texts.slice(i, i + settings.embedBatchSize))));
+      onBatch?.(out.length, total);
     }
     return out;
   }
-  return texts.map(hashVector);
+  const out = texts.map(hashVector);
+  onBatch?.(out.length, total);
+  return out;
 }
 
 export function embedderName(): string {

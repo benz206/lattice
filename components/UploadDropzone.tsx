@@ -9,8 +9,58 @@ const MAX_WARN_BYTES = 200 * 1024 * 1024;
 
 type UploadState =
   | { phase: "idle" }
-  | { phase: "uploading"; progress: number }
+  | {
+      phase: "uploading";
+      progress: number;
+      loaded: number;
+      total: number;
+      bytesPerSecond: number;
+    }
   | { phase: "error"; message: string };
+
+function formatDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "—";
+  const totalSeconds = Math.round(ms / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
+}
+
+interface UploadingState {
+  phase: "uploading";
+  progress: number;
+  loaded: number;
+  total: number;
+  bytesPerSecond: number;
+}
+
+function UploadProgress({ state }: { state: UploadingState }): React.JSX.Element {
+  const remainingBytes = Math.max(0, state.total - state.loaded);
+  const etaMs =
+    state.bytesPerSecond > 0 ? (remainingBytes / state.bytesPerSecond) * 1000 : Infinity;
+  const finalizing = state.progress >= 100;
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2 text-sm">
+        <Spinner />
+        <span>
+          {finalizing ? "Finalizing upload…" : "Uploading…"} {state.progress}%
+        </span>
+        <span className="ml-auto text-xs tabular-nums text-muted">
+          {formatBytes(state.loaded)} / {formatBytes(state.total)}
+          {!finalizing && Number.isFinite(etaMs) ? ` · ${formatDuration(etaMs)} left` : ""}
+        </span>
+      </div>
+      <div className="h-2 w-full overflow-hidden rounded-full bg-[color:var(--card)]">
+        <div
+          className="h-full bg-[color:var(--accent)] transition-[width] duration-200"
+          style={{ width: `${state.progress}%` }}
+        />
+      </div>
+    </div>
+  );
+}
 
 function isPdf(file: File): boolean {
   if (file.type === "application/pdf") return true;
@@ -58,7 +108,14 @@ export function UploadDropzone(): React.JSX.Element {
 
   const upload = useCallback(() => {
     if (!file) return;
-    setState({ phase: "uploading", progress: 0 });
+    const startedAt = Date.now();
+    setState({
+      phase: "uploading",
+      progress: 0,
+      loaded: 0,
+      total: file.size,
+      bytesPerSecond: 0,
+    });
 
     const form = new FormData();
     form.append("file", file);
@@ -69,7 +126,14 @@ export function UploadDropzone(): React.JSX.Element {
     xhr.upload.addEventListener("progress", (event) => {
       if (event.lengthComputable) {
         const pct = Math.round((event.loaded / event.total) * 100);
-        setState({ phase: "uploading", progress: pct });
+        const elapsedSeconds = Math.max(0.001, (Date.now() - startedAt) / 1000);
+        setState({
+          phase: "uploading",
+          progress: pct,
+          loaded: event.loaded,
+          total: event.total,
+          bytesPerSecond: event.loaded / elapsedSeconds,
+        });
       }
     });
 
@@ -186,19 +250,8 @@ export function UploadDropzone(): React.JSX.Element {
         </div>
       ) : null}
 
-      {uploading ? (
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-2 text-sm">
-            <Spinner />
-            <span>Uploading… {state.progress}%</span>
-          </div>
-          <div className="h-2 w-full overflow-hidden rounded-full bg-[color:var(--card)]">
-            <div
-              className="h-full bg-[color:var(--accent)] transition-[width]"
-              style={{ width: `${state.progress}%` }}
-            />
-          </div>
-        </div>
+      {uploading && state.phase === "uploading" ? (
+        <UploadProgress state={state} />
       ) : null}
 
       <div className="flex items-center gap-3">

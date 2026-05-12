@@ -1,4 +1,5 @@
 import { handleRouteError, HttpError, json } from "@/lib/server/http";
+import { getProgress } from "@/lib/server/progress";
 import { withStore } from "@/lib/server/store";
 
 export const runtime = "nodejs";
@@ -18,6 +19,7 @@ export async function GET(_request: Request, context: RouteContext): Promise<Res
       status: document.status,
       num_pages: document.num_pages,
       error: document.error,
+      progress: getProgress(document.id),
     });
   } catch (error) {
     return handleRouteError(error);

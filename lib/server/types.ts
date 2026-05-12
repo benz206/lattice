@@ -1,6 +1,25 @@
 export type Status = "pending" | "processing" | "ready" | "failed";
 export type SearchMode = "hybrid" | "vector" | "lexical";
 
+export type IngestionPhase =
+  | "queued"
+  | "extracting"
+  | "chunking"
+  | "embedding_chunks"
+  | "summarizing_sections"
+  | "indexing"
+  | "finalizing";
+
+export interface IngestionProgress {
+  phase: IngestionPhase;
+  phase_label: string;
+  current: number;
+  total: number;
+  estimated: boolean;
+  message: string;
+  updated_at: string;
+}
+
 export interface DocumentRecord {
   id: string;
   filename: string;
@@ -77,6 +96,9 @@ export interface DocumentMapSection {
   page_start: number;
   page_end: number;
   chunk_count: number;
+  summary?: string;
+  summary_embedding?: number[];
+  keywords?: string[];
 }
 
 export interface DocumentMapResponse {

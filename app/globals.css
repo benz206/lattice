@@ -57,8 +57,53 @@ body {
   animation: lattice-spin 0.8s linear infinite;
 }
 
+@keyframes lattice-indeterminate {
+  0% {
+    transform: translateX(-60%);
+  }
+  100% {
+    transform: translateX(160%);
+  }
+}
+
+.lattice-indeterminate-bar {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--accent) 70%, transparent) 50%,
+    transparent 100%
+  );
+  width: 40%;
+  animation: lattice-indeterminate 1.4s ease-in-out infinite;
+}
+
 .scroll-target {
   scroll-margin-top: 5rem;
+}
+
+.thin-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.thin-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.thin-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  background-color: var(--border);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.thin-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: var(--muted);
 }
 
 .markdown-preview > * + * {

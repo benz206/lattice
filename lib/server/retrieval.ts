@@ -2,10 +2,10 @@ import { cosine, embedTexts } from "./embedding";
 import { expandQuery } from "./query-expansion";
 import { rerankAndDiversifyHits } from "./reranking";
 import { buildRetrievalIndex, retrievalIndexMatchesChunks } from "./retrieval-index";
-import { readChunks, readRetrievalIndex } from "./store";
+import { readChunks, readRetrievalIndex, withStore } from "./store";
 import { createTimer, timingMap, type TimingSample } from "./timing";
 import { tokenizeForLexicalSearch } from "./tokenization";
-import type { ChunkRecord, FusedHit, RetrievalIndex, SearchMode } from "./types";
+import type { ChunkRecord, DocumentMapSection, FusedHit, RetrievalIndex, SearchMode } from "./types";
 
 function toHit(chunk: ChunkRecord, score: number): FusedHit {
   return {
@@ -126,6 +126,57 @@ function weightedRrf(vectorIds: string[], lexicalIds: string[], alpha = 0.5): Ma
   return fused;
 }
 
+const topSectionsDefault = (() => {
+  const env = process.env.LATTICE_TOP_SECTIONS;
+  if (!env || env === "off") return 0;
+  const n = parseInt(env, 10);
+  return Number.isFinite(n) && n > 0 ? n : 3;
+})();
+
+interface RoutedSections {
+  allowedOrdinals: Set<number>;
+  ordinal_ranges: [number, number][];
+  section_titles: string[];
+}
+
+async function routeToSections(
+  query: string,
+  documentId: string,
+  topSections: number,
+): Promise<RoutedSections | null> {
+  const document = await withStore((store) => Promise.resolve(store.getDocument(documentId)));
+  if (!document?.document_map) return null;
+  const sections = document.document_map.sections as DocumentMapSection[];
+  if (!sections.length || !sections[0]?.summary_embedding) return null;
+
+  const [queryVector] = await embedTexts([query]);
+  if (!queryVector) return null;
+
+  const scored = sections
+    .filter((s): s is DocumentMapSection & { summary_embedding: number[] } =>
+      Array.isArray(s.summary_embedding) && s.summary_embedding.length > 0,
+    )
+    .map((s) => ({ s, score: cosine(queryVector, s.summary_embedding) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topSections);
+
+  if (!scored.length) return null;
+
+  const allowedOrdinals = new Set<number>();
+  const ordinal_ranges: [number, number][] = [];
+  const section_titles: string[] = [];
+
+  for (const { s } of scored) {
+    for (let i = s.chunk_ordinal_start; i <= s.chunk_ordinal_end; i++) {
+      allowedOrdinals.add(i);
+    }
+    ordinal_ranges.push([s.chunk_ordinal_start, s.chunk_ordinal_end]);
+    section_titles.push(s.title ?? "(untitled)");
+  }
+
+  return { allowedOrdinals, ordinal_ranges, section_titles };
+}
+
 export interface SearchChunksMeta {
   mode: SearchMode;
   requested_top_k: number;
@@ -133,6 +184,7 @@ export interface SearchChunksMeta {
   hit_count: number;
   timings: TimingSample[];
   timing_ms: Record<string, number>;
+  routed_sections?: { ordinal_ranges: [number, number][]; section_titles: string[] };
 }
 
 export interface SearchChunksResult {
@@ -145,11 +197,13 @@ export async function searchChunksWithMeta({
   mode,
   topK = 20,
   documentId,
+  useSectionRouting = true,
 }: {
   query: string;
   mode: SearchMode;
   topK?: number;
   documentId?: string | null;
+  useSectionRouting?: boolean;
 }): Promise<SearchChunksResult> {
   const timer = createTimer();
   let hits: FusedHit[] = [];
@@ -178,15 +232,29 @@ export async function searchChunksWithMeta({
   );
   chunkCount = chunks.length;
 
+  const topSections = topSectionsDefault;
+  let routing: RoutedSections | null = null;
+  if (useSectionRouting && topSections > 0 && documentId) {
+    routing = await timer.asyncPhase("section_routing", () =>
+      routeToSections(query, documentId, topSections),
+    );
+  }
+
   if (mode === "vector") {
-    hits = await timer.asyncPhase("vector_search", () => vectorSearch(query, chunks, topK));
+    const rawHits = await timer.asyncPhase("vector_search", () => vectorSearch(query, chunks, topK));
+    hits = routing
+      ? rawHits.filter((h) => routing.allowedOrdinals.has(h.metadata.ordinal))
+      : rawHits;
   } else if (mode === "lexical") {
     const retrievalIndex = await timer.asyncPhase("load_retrieval_index", () =>
       loadRetrievalIndex(documentId, chunks),
     );
-    const lexicalHits = timer.syncPhase("lexical_search", () =>
+    const rawLexicalHits = timer.syncPhase("lexical_search", () =>
       lexicalSearch(query, chunks, retrievalIndex, Math.max(40, topK)),
     );
+    const lexicalHits = routing
+      ? rawLexicalHits.filter((h) => routing.allowedOrdinals.has(h.metadata.ordinal))
+      : rawLexicalHits;
     hits = timer.syncPhase("rerank_results", () =>
       rerankAndDiversifyHits(lexicalHits, query, { topK }),
     );
@@ -195,7 +263,9 @@ export async function searchChunksWithMeta({
       loadRetrievalIndex(documentId, chunks),
     );
     const [vectorHits, lexicalHits] = await Promise.all([
-      timer.asyncPhase("vector_search", () => vectorSearch(query, chunks, Math.max(40, topK))),
+      timer.asyncPhase("vector_search", () =>
+        vectorSearch(query, chunks, Math.max(40, topK)),
+      ),
       Promise.resolve(
         timer.syncPhase("lexical_search", () =>
           lexicalSearch(query, chunks, retrievalIndex, Math.max(40, topK)),
@@ -218,9 +288,12 @@ export async function searchChunksWithMeta({
           text: current?.text || hit.text,
         });
       }
-      return [...fused.entries()]
+      const all = [...fused.entries()]
         .sort((a, b) => b[1] - a[1])
         .map(([id, score]) => ({ ...byId.get(id)!, rrf_score: score }));
+      return routing
+        ? all.filter((h) => routing.allowedOrdinals.has(h.metadata.ordinal))
+        : all;
     });
     hits = timer.syncPhase("rerank_results", () =>
       rerankAndDiversifyHits(fusedHits, query, { topK }),
@@ -237,6 +310,14 @@ export async function searchChunksWithMeta({
       hit_count: hits.length,
       timings,
       timing_ms: timingMap(timings),
+      ...(routing
+        ? {
+            routed_sections: {
+              ordinal_ranges: routing.ordinal_ranges,
+              section_titles: routing.section_titles,
+            },
+          }
+        : {}),
     },
   };
 }

@@ -32,11 +32,31 @@ export interface DocumentDetail extends DocumentOut {
   num_chunks: number;
 }
 
+export type IngestionPhase =
+  | "queued"
+  | "extracting"
+  | "chunking"
+  | "embedding_chunks"
+  | "summarizing_sections"
+  | "indexing"
+  | "finalizing";
+
+export interface IngestionProgress {
+  phase: IngestionPhase;
+  phase_label: string;
+  current: number;
+  total: number;
+  estimated: boolean;
+  message: string;
+  updated_at: string;
+}
+
 export interface DocumentStatusResponse {
   id: string;
   status: Status;
   num_pages: number | null;
   error: string | null;
+  progress: IngestionProgress | null;
 }
 
 export interface ChunkOut {
@@ -128,15 +148,25 @@ export interface RetrievalMeta {
   [key: string]: unknown;
 }
 
+export interface ReflectionInfo {
+  enabled: boolean;
+  sentences_total: number;
+  sentences_dropped: number;
+  verifier_calls: number;
+  reflection_triggered_requery: boolean;
+}
+
 export interface AnswerResponse {
   query: string;
   answer: string;
+  raw_answer: string;
   citations: Citation[];
   evidence: Evidence[];
   insufficient: boolean;
   confidence: number;
   answer_score: number;
   retrieval_meta: RetrievalMeta;
+  reflection: ReflectionInfo;
 }
 
 export interface HealthResponse {
